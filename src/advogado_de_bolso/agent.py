@@ -8,10 +8,7 @@ from pydantic_ai import Agent
 
 from advogado_de_bolso.config import Settings
 from advogado_de_bolso.deps import Deps
-from advogado_de_bolso.tools.calculos import (
-    calcular_prazo_arrependimento,
-    calcular_prazo_reclamacao_vicio,
-)
+from advogado_de_bolso.tools.calculos import calcular_prazo_consumidor
 from advogado_de_bolso.tools.rag import search_knowledge_base
 from advogado_de_bolso.tools.redigir import redigir_documento
 from advogado_de_bolso.tools.revisor import revisar_resposta
@@ -48,10 +45,8 @@ original + a resposta final. Nao passe seu raciocinio interno para ele.
 FERRAMENTAS DISPONIVEIS
 - `search_knowledge_base`: busca trechos relevantes na base indexada
   (CDC, jurisprudencia, cartilhas, etc.).
-- `calcular_prazo_reclamacao_vicio`: calcula prazo para reclamar de vicio
-  em produto/servico (CDC art. 26).
-- `calcular_prazo_arrependimento`: calcula prazo de arrependimento para
-  compras fora do estabelecimento (CDC art. 49).
+- `calcular_prazo_consumidor`: calcula prazos do CDC, incluindo reclamacao
+  por vicio (art. 26) e direito de arrependimento (art. 49).
 - `redigir_documento`: redige e-mail, reclamacao PROCON, notificacao
   extrajudicial, mensagem em rede social ou recurso administrativo.
 - `revisar_resposta`: subagente que revisa a resposta final. Passar
@@ -60,11 +55,27 @@ FERRAMENTAS DISPONIVEIS
 QUANDO USAR CADA TOOL
 - Use `search_knowledge_base` antes de responder sobre artigos do CDC,
   sumulas do STJ, ou qualquer fato que dependa de legislacao/jurisprudencia.
-- Use as ferramentas de calculo sempre que o usuario quiser saber prazos.
+- Use `calcular_prazo_consumidor` sempre que o usuario quiser saber prazos.
 - Use `redigir_documento` quando o usuario pedir um texto pronto para enviar.
 - Use `revisar_resposta` para respostas longas ou que envolvam orientacao
   juridica - nao use para respostas triviais (saudacoes, perguntas curtas).
-  Lembre-se: passe APENAS o contexto do usuario sem seu raciocinio."""
+  Lembre-se: passe APENAS o contexto do usuario sem seu raciocinio.
+
+PRAZOS E DATAS
+- Use a ferramenta `calcular_prazo_consumidor` para calculos de prazo do CDC.
+- Antes de calcular, confirme qual e a data juridicamente relevante.
+- Para vicio aparente ou de facil constatacao, use a data de entrega do
+  produto ou de conclusao do servico.
+- Para vicio oculto, use a data em que o defeito ficou evidente ao consumidor.
+- Para direito de arrependimento em compra fora do estabelecimento, use a
+  data de recebimento do produto ou da contratacao do servico, nao
+  necessariamente a data do pagamento.
+- Para reclamacao por vicio, identifique se o item e produto duravel,
+  produto nao duravel, servico duravel ou servico nao duravel.
+- Se o usuario informar apenas "data da compra" e isso puder alterar o
+  calculo, faca uma pergunta de esclarecimento antes de calcular.
+- Ao responder, explique que o prazo depende dos fatos concretos e da
+  data inicial correta."""
 
 
 def build_agent(settings: Settings) -> Agent[Deps, str]:
@@ -82,8 +93,7 @@ def build_agent(settings: Settings) -> Agent[Deps, str]:
     )
 
     agent.tool(search_knowledge_base)
-    agent.tool_plain(calcular_prazo_reclamacao_vicio)
-    agent.tool_plain(calcular_prazo_arrependimento)
+    agent.tool_plain(calcular_prazo_consumidor)
     agent.tool(redigir_documento)
     agent.tool(revisar_resposta)
 
