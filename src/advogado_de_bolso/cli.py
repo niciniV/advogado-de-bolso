@@ -7,11 +7,12 @@ import logging
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from typing import Any
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.history import FileHistory
-from rich.console import Console
+from pydantic_ai import Agent
+from pydantic_ai.messages import ModelMessage
+from rich.console import Console, RenderableType
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -34,24 +35,24 @@ class _Command:
 
     aliases: tuple[str, ...]
     help_text: str
-    handler: Callable
+    handler: Callable[[Any, list[ModelMessage]], str | None]
 
 
-def _handle_exit(settings, message_history: list) -> str:
+def _handle_exit(_settings: Any, _message_history: list[ModelMessage]) -> str:
     console.print("Ate logo!")
     return "exit"
 
 
-def _handle_clear(settings, message_history: list) -> None:
+def _handle_clear(_settings: Any, message_history: list[ModelMessage]) -> None:
     message_history.clear()
     console.print("[dim]Historico da sessao limpo.[/dim]")
 
 
-def _handle_help(settings, message_history: list) -> None:
+def _handle_help(_settings: Any, _message_history: list[ModelMessage]) -> None:
     console.print(COMMANDS_HELP)
 
 
-def _handle_modelo(settings, message_history: list) -> None:
+def _handle_modelo(settings: Any, _message_history: list[ModelMessage]) -> None:
     console.print(
         f"Modelo LLM:     {settings.llm_model}\n"
         f"Thinking level: {settings.thinking_level or 'off'}\n"
@@ -85,7 +86,7 @@ def _build_commands_help() -> str:
 COMMANDS_HELP = _build_commands_help()
 
 
-def _render_welcome(settings) -> None:
+def _render_welcome(settings: Any) -> None:
     console.print(
         Panel.fit(
             "[bold blue]Advogado de Bolso[/bold blue]\n"
@@ -116,20 +117,23 @@ def _check_config() -> bool:
     return True
 
 
-def _make_response_panel(content) -> Panel:
+def _make_response_panel(content: RenderableType) -> Panel:
     return Panel(content, title=RESPONSE_TITLE, border_style="blue")
 
 
 async def _stream_agent_response(
-    agent, user_input: str, deps: Deps, message_history: list
-) -> tuple[str, list] | None:
+    agent: Agent[Deps, str],
+    user_input: str,
+    deps: Deps,
+    message_history: list[ModelMessage],
+) -> tuple[str, list[ModelMessage]] | None:
     """Roda o agente em modo streaming, exibindo a resposta em tempo real.
 
     Retorna (output_final, message_history_atualizado) ou None em caso de erro.
     """
     accumulated = ""
 
-    def renderable():
+    def renderable() -> RenderableType:
         if not accumulated:
             return Spinner("dots", text="Pensando...")
         return Markdown(accumulated)
@@ -179,13 +183,11 @@ async def _run_chat_loop() -> None:
         retriever=retriever,
     )
 
-    history_file = Path("./storage/cli_history.txt")
-    history_file.parent.mkdir(parents=True, exist_ok=True)
-    session: PromptSession[str] = PromptSession(history=FileHistory(str(history_file)))
+    session: PromptSession[str] = PromptSession()
 
     _render_welcome(settings)
 
-    message_history: list = []
+    message_history: list[ModelMessage] = []
 
     while True:
         try:

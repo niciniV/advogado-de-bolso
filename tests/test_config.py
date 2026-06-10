@@ -21,6 +21,11 @@ class TestSettingsDefaults:
         s = Settings()
         assert s.thinking_level == "HIGH"
 
+    @pytest.mark.parametrize("value", [0, -1, 51])
+    def test_retrieval_top_k_is_bounded(self, value: int):
+        with pytest.raises(ValidationError):
+            Settings(RETRIEVAL_TOP_K=value)
+
 
 class TestThinkingLevelValidation:
     @pytest.mark.parametrize("level", VALID_THINKING_LEVELS)

@@ -14,8 +14,9 @@ usuario enxerga.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_ai import Agent, RunContext
 
 from advogado_de_bolso.deps import Deps
@@ -73,13 +74,19 @@ class RevisionResult(BaseModel):
         description="Sugestoes concretas de correcao (com texto reescrito quando possivel).",
     )
     approved_as_is: bool = Field(
-        default=True,
+        default=False,
         description="True se a resposta esta OK e pode ser entregue sem mudancas.",
     )
 
+    @model_validator(mode="after")
+    def _validate_consistency(self) -> RevisionResult:
+        if self.approved_as_is and (self.needs_revision or self.issues):
+            raise ValueError("Uma resposta aprovada nao pode exigir revisao ou conter problemas.")
+        return self
+
 
 @lru_cache(maxsize=1)
-def _get_revision_agent() -> Agent:
+def _get_revision_agent() -> Agent[None, RevisionResult]:
     """Returns a cached revision Agent (created once, reused)."""
     return Agent(
         model=None,
@@ -104,21 +111,14 @@ async def revisar_resposta(
     Returns:
         Resumo da revisao: "OK - aprovada" ou lista de problemas + sugestoes.
     """
-    user_prompt = (
-        f"PERGUNTA DO USUARIO:\n{pergunta_usuario}\n\n"
-        f"RESPOSTA GERADA PELO AGENTE PRINCIPAL:\n{resposta_original}\n\n"
-        "Revise a resposta acima."
-    )
-
-    revision_agent = _get_revision_agent()
-    result = await revision_agent.run(
-        user_prompt,
+    rev = await review_response(
+        question=pergunta_usuario,
+        response=resposta_original,
         model=ctx.model,
         model_settings=ctx.deps.model_settings,
     )
-    rev = result.output
 
-    if rev.approved_as_is or not rev.needs_revision:
+    if rev.approved_as_is and not rev.needs_revision and not rev.issues:
         return "OK - resposta aprovada sem mudancas."
 
     parts = [f"REVISAO NECESSARIA ({len(rev.issues)} problema(s)):"]
@@ -129,3 +129,26 @@ async def revisar_resposta(
         for s in rev.suggestions:
             parts.append(f"  - {s}")
     return "\n".join(parts)
+
+
+async def review_response(
+    *,
+    question: str,
+    response: str,
+    model: Any,
+    model_settings: Any,
+) -> RevisionResult:
+    """Run the independent reviewer and return its structured verdict."""
+    user_prompt = (
+        f"PERGUNTA DO USUARIO:\n{question}\n\n"
+        f"RESPOSTA GERADA PELO AGENTE PRINCIPAL:\n{response}\n\n"
+        "Revise a resposta acima."
+    )
+
+    revision_agent = _get_revision_agent()
+    result = await revision_agent.run(
+        user_prompt,
+        model=model,
+        model_settings=model_settings,
+    )
+    return result.output

@@ -136,4 +136,4 @@ class TestRevisarResposta:
             pergunta_usuario="Pergunta.",
         )
 
-        assert "aprovada" in result.lower()
+        assert "REVISAO NECESSARIA" in result

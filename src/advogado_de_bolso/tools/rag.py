@@ -23,9 +23,10 @@ async def search_knowledge_base(
     jurisprudencia, cartilhas do PROCON ou qualquer material indexado.
     """
     retriever = ctx.deps.retriever
-    k = top_k if top_k is not None else ctx.deps.settings.retrieval_top_k
+    configured_k = ctx.deps.settings.retrieval_top_k
+    k = min(top_k, configured_k) if top_k is not None else configured_k
     if k < 1:
-        k = ctx.deps.settings.retrieval_top_k
+        k = configured_k
 
     nodes = await retriever.aretrieve(query)
     nodes = sorted(nodes, key=lambda n: getattr(n, "score", 0.0) or 0.0, reverse=True)[:k]

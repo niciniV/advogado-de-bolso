@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Orientacao acessivel sobre direitos do consumidor brasileiro.">
+    <title>Advogado de Bolso</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="masthead">
+        <a class="brand" href="/" aria-label="Advogado de Bolso, inicio">
+          <span class="brand-mark" aria-hidden="true">§</span>
+          <span>
+            <strong>Advogado de Bolso</strong>
+            <small>Direitos do consumidor, em linguagem clara</small>
+          </span>
+        </a>
+        <button id="reset-session" class="quiet-button" type="button">Nova conversa</button>
+      </header>
+
+      <main class="workspace">
+        <section class="intro" aria-labelledby="intro-title">
+          <p class="eyebrow">Informacao para agir</p>
+          <h1 id="intro-title">Entenda seus direitos antes do proximo passo.</h1>
+          <p>
+            Conte o que aconteceu. O assistente ajuda a organizar o caso,
+            localizar regras do CDC e preparar uma acao pratica.
+          </p>
+          <div class="notice">
+            <strong>Importante:</strong> a orientacao e informativa e nao substitui
+            a analise de um advogado ou da Defensoria Publica.
+          </div>
+        </section>
+
+        <section class="chat-card" aria-labelledby="chat-title">
+          <div class="chat-heading">
+            <div>
+              <p class="eyebrow">Conversa privada nesta aba</p>
+              <h2 id="chat-title">Descreva sua situacao</h2>
+            </div>
+            <span id="connection-status" class="status" data-state="checking">Verificando API</span>
+          </div>
+
+          <div id="messages" class="messages" aria-live="polite" aria-label="Mensagens da conversa">
+            <article class="message assistant-message">
+              <span class="message-label">Assistente</span>
+              <p>Qual problema de consumo voce precisa resolver hoje?</p>
+            </article>
+          </div>
+
+          <form id="chat-form" class="composer">
+            <label for="message">Sua mensagem</label>
+            <textarea
+              id="message"
+              name="message"
+              rows="3"
+              maxlength="8000"
+              placeholder="Ex.: Comprei um produto online e quero cancelar..."
+              required
+            ></textarea>
+            <div class="composer-footer">
+              <span>Enter envia · Shift + Enter quebra a linha</span>
+              <button id="send-button" type="submit">Enviar pergunta</button>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>

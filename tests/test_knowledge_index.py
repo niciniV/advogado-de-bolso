@@ -61,6 +61,40 @@ class TestKnowledgeIndexBuildOrLoad:
         index.build_or_load(documents=[MagicMock()])
         assert MockVSI.from_documents.call_count == 2
 
+    @patch("advogado_de_bolso.knowledge.index.HuggingFaceEmbedding")
+    @patch("advogado_de_bolso.knowledge.index.chromadb.PersistentClient")
+    @patch("advogado_de_bolso.knowledge.index.VectorStoreIndex")
+    def test_replace_documents_deletes_stale_collection(
+        self, MockVSI, MockChroma, MockHF, settings
+    ):
+        client = MockChroma.return_value
+        replacement = client.get_or_create_collection.return_value
+        MockVSI.from_documents.return_value = MagicMock()
+        index = KnowledgeIndex(settings)
+
+        result = index.replace_documents([MagicMock()])
+
+        client.delete_collection.assert_called_once_with(settings.collection_name)
+        client.get_or_create_collection.assert_called_once()
+        replacement.modify.assert_called_once_with(name=settings.collection_name)
+        MockVSI.from_documents.assert_called_once()
+        assert result is not None
+
+    @patch("advogado_de_bolso.knowledge.index.HuggingFaceEmbedding")
+    @patch("advogado_de_bolso.knowledge.index.chromadb.PersistentClient")
+    @patch("advogado_de_bolso.knowledge.index.VectorStoreIndex")
+    def test_replace_documents_preserves_old_collection_when_build_fails(
+        self, MockVSI, MockChroma, MockHF, settings
+    ):
+        MockVSI.from_documents.side_effect = RuntimeError("embedding failure")
+        index = KnowledgeIndex(settings)
+
+        with pytest.raises(RuntimeError, match="embedding failure"):
+            index.replace_documents([MagicMock()])
+
+        deleted_names = [call.args[0] for call in MockChroma.return_value.delete_collection.call_args_list]
+        assert settings.collection_name not in deleted_names
+
 
 class TestKnowledgeIndexRetriever:
     @patch("advogado_de_bolso.knowledge.index.HuggingFaceEmbedding")

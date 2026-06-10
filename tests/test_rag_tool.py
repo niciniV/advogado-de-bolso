@@ -116,3 +116,17 @@ class TestSearchKnowledgeBase:
         """A negative top_k should fall back to the config default, not slice backwards."""
         result = await search_knowledge_base(ctx, "test query", top_k=-1)
         assert isinstance(result, str)
+
+    @pytest.mark.asyncio
+    async def test_top_k_cannot_expand_beyond_configured_limit(self, ctx, mock_retriever):
+        nodes = [
+            _make_node(1.0 - i * 0.1, f"doc{i}.txt", f"node-{i}", f"Conteudo {i}")
+            for i in range(5)
+        ]
+        mock_retriever.aretrieve.return_value = nodes
+        ctx.deps.settings.retrieval_top_k = 2
+
+        result = await search_knowledge_base(ctx, "teste", top_k=5)
+
+        assert "[2]" in result
+        assert "[3]" not in result

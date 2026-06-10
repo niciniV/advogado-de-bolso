@@ -53,7 +53,7 @@ def main() -> None:
     console.print(f"Encontrados [bold]{len(documents)}[/bold] documento(s).")
 
     knowledge = KnowledgeIndex(settings)
-    knowledge.build_or_load(documents=documents)
+    knowledge.replace_documents(documents)
 
     console.print(
         Panel.fit(

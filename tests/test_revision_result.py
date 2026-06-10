@@ -21,7 +21,7 @@ class TestRevisionResultDefaults:
 
     def test_approved_as_is_default_true(self):
         r = RevisionResult()
-        assert r.approved_as_is is True
+        assert r.approved_as_is is False
 
 
 class TestRevisionResultCreation:
@@ -60,6 +60,14 @@ class TestRevisionResultValidation:
         with pytest.raises(ValidationError):
             RevisionResult(approved_as_is="maybe")  # type: ignore[arg-type]
 
+    def test_rejects_contradictory_approval(self):
+        with pytest.raises(ValidationError):
+            RevisionResult(
+                needs_revision=True,
+                issues=["Erro juridico"],
+                approved_as_is=True,
+            )
+
 
 class TestRevisionResultEdgeCases:
     def test_approved_as_is_without_revision(self):
@@ -80,3 +88,4 @@ class TestRevisionResultEdgeCases:
         r = RevisionResult(needs_revision=True, issues=["Erro"])
         assert r.needs_revision is True
         assert r.issues == ["Erro"]
+        assert r.approved_as_is is False

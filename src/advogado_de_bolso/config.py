@@ -32,8 +32,11 @@ class Settings(BaseSettings):
     chroma_path: Path = Field(default=Path("./storage/chroma"), alias="CHROMA_PATH")
     collection_name: str = Field(default="advogado_de_bolso", alias="COLLECTION_NAME")
 
-    retrieval_top_k: int = Field(default=5, alias="RETRIEVAL_TOP_K")
+    retrieval_top_k: int = Field(default=5, ge=1, le=50, alias="RETRIEVAL_TOP_K")
     hf_home: Path = Field(default=Path("./storage/hf_cache"), alias="HF_HOME")
+    api_host: str = Field(default="127.0.0.1", alias="API_HOST")
+    api_port: int = Field(default=8000, ge=1, le=65535, alias="API_PORT")
+    cors_origins: str = Field(default="http://localhost:3000,http://localhost:5173", alias="CORS_ORIGINS")
 
     @property
     def resolved_google_api_key(self) -> str:
@@ -42,6 +45,10 @@ class Settings(BaseSettings):
     @property
     def full_model_name(self) -> str:
         return f"{self.llm_provider}:{self.llm_model}"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @field_validator("thinking_level")
     @classmethod
@@ -69,7 +76,7 @@ class Settings(BaseSettings):
             return None
         from pydantic_ai.models.google import GoogleModelSettings
 
-        return GoogleModelSettings(google_thinking_config=thinking)
+        return GoogleModelSettings(google_thinking_config=thinking)  # type: ignore[typeddict-item]
 
 
 @lru_cache(maxsize=1)

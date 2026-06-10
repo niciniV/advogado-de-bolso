@@ -5,9 +5,12 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any
+from uuid import uuid4
 
 import chromadb
+from chromadb.errors import NotFoundError
 from llama_index.core import (
+    Document,
     StorageContext,
     VectorStoreIndex,
 )
@@ -53,7 +56,7 @@ class KnowledgeIndex:
         self._get_embed_model()
         self._get_chroma_collection()
 
-    def build_or_load(self, documents: list | None = None) -> VectorStoreIndex:
+    def build_or_load(self, documents: list[Document] | None = None) -> VectorStoreIndex:
         """Constroi um novo indice a partir de documentos OU carrega o existente."""
         embed_model = self._get_embed_model()
 
@@ -76,6 +79,38 @@ class KnowledgeIndex:
                 embed_model=embed_model,
             )
         return self._index
+
+    def replace_documents(self, documents: list[Document]) -> VectorStoreIndex:
+        """Build a replacement first so a failed ingestion preserves the usable index."""
+        embed_model = self._get_embed_model()
+        self._settings.chroma_path.mkdir(parents=True, exist_ok=True)
+        client = chromadb.PersistentClient(path=str(self._settings.chroma_path))
+        replacement_name = f"{self._settings.collection_name[:45]}-next-{uuid4().hex[:8]}"
+        replacement = client.get_or_create_collection(
+            name=replacement_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+        try:
+            vector_store = ChromaVectorStore(chroma_collection=replacement)
+            storage_context = StorageContext.from_defaults(vector_store=vector_store)
+            next_index = VectorStoreIndex.from_documents(
+                documents,
+                storage_context=storage_context,
+                embed_model=embed_model,
+                show_progress=True,
+            )
+        except Exception:
+            client.delete_collection(replacement_name)
+            raise
+
+        try:
+            client.delete_collection(self._settings.collection_name)
+        except NotFoundError:
+            logger.info("Colecao anterior ainda nao existe; promovendo a nova.")
+        replacement.modify(name=self._settings.collection_name)
+        self._chroma_collection = replacement
+        self._index = next_index
+        return next_index
 
     def as_retriever(self) -> Any:
         if self._index is None:
