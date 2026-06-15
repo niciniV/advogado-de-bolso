@@ -2891,3 +2891,40 @@ Note: this project uses an alternative batch numbering (1=contracts, 2=schemas+a
 - The per-case `asyncio.Lock` is NOT implemented at the storage layer — the spec defers lock management to the service layer. `service.py` (batch 4) will own a lock registry that injects per-case locks; the storage layer's atomic-write pattern is independent of the lock (the lock just serializes callers).
 - On Windows, concurrent saves to the SAME case may race (`os.replace` returns `PermissionError` when the target is in use). The spec acknowledges this as last-writer-wins; the test tolerates the transient error and asserts the final file is valid JSON.
 
+---
+
+## Implementation Notes → Batch 4 (Service/API)
+
+### Files changed (batch 4)
+
+- `src/advogado_de_bolso/config.py` — added `cases_path: Path = Field(default=Path("./storage/cases"), alias="CASES_PATH")` (ISSUE-M3-014).
+- `.env.example` — added `CASES_PATH=./storage/cases` next to `CHROMA_PATH`.
+- `src/advogado_de_bolso/agent.py` — **REWRITTEN**. Full merged `SYSTEM_PROMPT` (describing the new tool return shapes); `STYLE_PROMPTS` dict (simples/detalhado/firme); `_current_style: ContextVar[str | None]`; `@agent.instructions` callback that reads from `_current_style`. Registers `search_knowledge_base`, `calcular_prazo_consumidor` (`tool_plain`), `redigir_documento`.
+- `src/advogado_de_bolso/service.py` — **REWRITTEN**. Disk-persistent `ChatService` with per-case `asyncio.Lock` (registry retained for service lifetime). New module-scope helpers `_collect_tool_returns` (scans `new_messages` only per ISSUE-USR-002), `_truncate_history_to_turns` (groups at user-prompt boundaries to keep tool call/return pairs paired per ISSUE-USR-003), `_now`/`_now_ms`, locally defined `REVIEW_BLOCKED_MESSAGE` (per ISSUE-IND-001). `ChatResult` dataclass renamed from `ChatReply` to avoid the self-naming collision with `schemas.StructuredChatResponse` (ISSUE-002). `ChatBackend` and `ReviewerLike` Protocols. `AgentChatBackend` no longer runs the reviewer (per ISSUE-M3-003). `chat_structured` is the new primary method. `list_cases`, `get_case`, `update_case_meta` (acquires the per-case lock per ISSUE-USR-013), `delete_case`, `get_history` complete the surface. `build_chat_service(settings, deps_factory=None)` injects `settings.cases_path` (ISSUE-USR-007).
+- `src/advogado_de_bolso/api.py` — **REWRITTEN**. New endpoint set: `POST /api/chat/structured` (200 success / 422 blocked envelope via `model_dump(mode="json")` per ISSUE-USR-008), `GET /api/cases`, `GET /api/cases/{case_id}` (UUID), `PATCH /api/cases/{case_id}` (UUID, `UpdateCaseRequest` body), `DELETE /api/cases/{case_id}` (UUID), `GET /api/cases/{case_id}/history` (UUID), `GET /api/health`. CORS `allow_methods=["GET", "POST", "PATCH", "DELETE"]` (PATCH added per ISSUE-DS-004). Explicit SPA fallback (not `StaticFiles(html=True)`) with first-segment match for `/api` and `/assets` (per ISSUE-009). `_to_case_response` hides `model_history` from the wire.
+- `tests/test_config.py` — added `test_default_cases_path_is_path` and `TestCasesPathOverride::test_cases_path_override_is_path`.
+- `tests/test_agent.py` — **EXTENDED**. Added `test_build_agent_registers_style_instructions`, `test_context_var_resets_after_request` (ISSUE-DS-008), `test_context_var_visible_inside_chat_structured`, `test_context_var_uses_case_default_when_request_omits_style`, `test_blocked_response_does_not_create_case_file` (ISSUE-USR-004).
+- `tests/test_service.py` — **REWRITTEN**. Old in-memory session tests dropped. New: 42 tests covering constructor, new-session case creation, appends, blocked envelope, per-case lock (serialization, retention, concurrent delete+chat), ContextVar reset, `update_case_meta` (all field validations), `delete_case`, `get_history`, `list_cases`, `model_history` persistence (with tool parts and JSON round-trip degradation per ISSUE-USR-016), helper unit tests, `AgentChatBackend`, and `build_chat_service` wiring (verifies `settings.cases_path` injection per ISSUE-USR-007).
+- `tests/test_api.py` — **REWRITTEN**. Old endpoint tests dropped. New: 38 tests covering `POST /api/chat/structured` (200 success, 422 blocked, 422 validation: blank/over-8000 message, unknown icon/style, blank/over-120 title; first-message metadata reach the service; 503 on unhandled exceptions), `GET /api/cases`, `GET /api/cases/{id}` (200/404/422 malformed UUID), `PATCH /api/cases/{id}` (title/icon_name/response_style/combined, 422 empty body, 422 unknown field, 404 missing, 422 service validation, 422 malformed UUID), `DELETE /api/cases/{id}` (204/404/422 malformed UUID), `GET /api/cases/{id}/history` (200/404/422 malformed UUID), SPA fallback (`GET /` returns `index.html` when dist exists, `/api/chatt` 404, `/assets` mount served), CORS allows PATCH, old endpoints gone, `CaseResponse` does not expose `model_history`.
+
+### Gate verification (batch 4)
+
+- `uv run pytest tests/test_config.py tests/test_agent.py tests/test_service.py tests/test_api.py -v` — **113 passed**.
+- `uv run pytest` — **287 passed** (113 new + 174 existing; no regressions).
+- `uv run ruff check src/ tests/` — **All checks passed**.
+- `uv run mypy src/` — **Success: no issues found in 22 source files**.
+
+### Plan spec deviations (batch 4)
+
+- `service.py:295` — the plan spec called `structured.deadline.model_dump(mode="json")` for `ChatMessage.deadline`, but `ChatMessage.deadline` is typed as `DeadlineResult | None`. Used the typed object directly (Pydantic handles JSON serialization on save). Without this fix, mypy strict rejected the dict-or-typed mismatch.
+- `api.py` — `ChatServiceContract` is now a `typing.Protocol` (was a regular class in the plan). The `Protocol` form is structurally typed and lets tests inject duck-typed fakes without inheriting from a base class.
+- `build_chat_service` — the plan signature was `build_chat_service(settings, deps_factory)`; we relaxed to `deps_factory: Callable[[], Deps] | None = None` so the lifespan can call it without arguments (it builds its own default factory if `None` is passed). Tests inject custom factories to avoid touching Chroma / LlamaIndex.
+- `service.py:240` — `icon_name` parameter typed as `Literal["shopping_bag", "receipt_long", "local_shipping", "gavel"] | None` (was `str | None` in the plan). The narrower type keeps mypy strict happy when passing to `Case(icon_name=...)`.
+- `test_old_chat_endpoint_gone` — FastAPI returns 405 (not 404) for `POST /api/chat` because the prefix `/api/chat/structured` is registered for POST. The test accepts either 404 or 405 as "endpoint gone".
+
+### Known follow-ups (batch 4 → batch 5)
+
+- `cli.py` is still under the pre-batch-4 design (in-memory sessions, no reviewer gate). Batch 5 will rewrite it to use the new `ChatService.chat_structured` and the storage layer.
+- The SPA fallback in `api.py` only mounts `/assets` if `REACT_DIST / "assets"` exists; the SPA test currently creates a fake `dist` tree via monkeypatch. The full `base_frontend/dist` build is batch 6+.
+- The CORS preflight test (`test_cors_allows_patch_method`) inspects the `access-control-allow-methods` response header. Browser preflights use this header to confirm PATCH is allowed; without the batch-4 fix (ISSUE-DS-004), the header would have been missing PATCH.
+

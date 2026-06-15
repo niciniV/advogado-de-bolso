@@ -90,8 +90,9 @@ delete, and list cases. Disk is the source of truth; there is no `_index.json`.
 - `src/advogado_de_bolso/config.py` — `Settings.cases_path` is wired in
   batch 4; the storage layer accepts it as a parameter rather than
   reading from settings.
-- `src/advogado_de_bolso/service.py` — `ChatService` will inject
-  `self._cases_path` on every call (batch 4).
+- `src/advogado_de_bolso/service.py` — `ChatService` injects
+  `self._cases_path` on every call (batch 4). The service also creates
+  the directory at `__init__` time (per spec ISSUE-005 / 6-of-20).
 - `tests/test_storage.py` — golden tests for the storage layer.
 - `.opencode/plans/04-storage.md` — full storage spec.
 - `.opencode/plans/15-backend-tests.md` — storage test spec.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -21,10 +22,22 @@ class TestSettingsDefaults:
         s = Settings()
         assert s.thinking_level == "HIGH"
 
+    def test_default_cases_path_is_path(self):
+        s = Settings()
+        assert isinstance(s.cases_path, Path)
+        assert s.cases_path == Path("./storage/cases")
+
     @pytest.mark.parametrize("value", [0, -1, 51])
     def test_retrieval_top_k_is_bounded(self, value: int):
         with pytest.raises(ValidationError):
             Settings(RETRIEVAL_TOP_K=value)
+
+
+class TestCasesPathOverride:
+    def test_cases_path_override_is_path(self, tmp_path: Path) -> None:
+        s = Settings(CASES_PATH=str(tmp_path / "my_cases"))
+        assert isinstance(s.cases_path, Path)
+        assert s.cases_path == tmp_path / "my_cases"
 
 
 class TestThinkingLevelValidation:

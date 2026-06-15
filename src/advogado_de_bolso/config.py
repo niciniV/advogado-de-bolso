@@ -30,6 +30,7 @@ class Settings(BaseSettings):
 
     data_path: Path = Field(default=Path("./data/raw"), alias="DATA_PATH")
     chroma_path: Path = Field(default=Path("./storage/chroma"), alias="CHROMA_PATH")
+    cases_path: Path = Field(default=Path("./storage/cases"), alias="CASES_PATH")
     collection_name: str = Field(default="advogado_de_bolso", alias="COLLECTION_NAME")
 
     retrieval_top_k: int = Field(default=5, ge=1, le=50, alias="RETRIEVAL_TOP_K")
