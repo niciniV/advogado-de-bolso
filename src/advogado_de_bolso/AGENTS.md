@@ -18,6 +18,8 @@ Core application package for the "Advogado de Bolso" chatbot - an agentic assist
 - Always recommend professional legal counsel for complex cases
 - Agent responses must be reviewed before delivery (revisor tool)
 - All settings loaded from environment variables via pydantic-settings
+- **Tool return shapes are typed envelopes** (`contracts.py`): `calcular_prazo_consumidor` returns `DeadlineResult` (success) or `str` (error path: missing `tipo_item`, invalid date, invalid `tipo_prazo`); `redigir_documento` returns `DraftedDocument`; `search_knowledge_base` returns `list[KnowledgeChunk]`. The adapter (added in a later batch) dispatches on `isinstance(part.content, X)` and ignores `str` returns.
+- The `Tom` alias for `redigir_documento` is the canonical `contracts.Tom`; do not redeclare it locally in `tools/redigir.py`.
 
 ## File Map
 
@@ -27,6 +29,7 @@ Core application package for the "Advogado de Bolso" chatbot - an agentic assist
 | `api.py` | `create_app()`, `app`, `run()` | FastAPI app factory, `/api/chat` POST, `/api/health` GET, `/api/sessions/{id}` DELETE, static frontend mount |
 | `cli.py` | `app()` | Interactive REPL: `prompt_toolkit` input, `rich` markdown streaming, slash commands (`/sair`, `/limpar`, `/ajuda`, `/modelo`) |
 | `config.py` | `Settings`, `get_settings()` | Pydantic BaseSettings: LLM keys, model, embedding, paths, API host/port, CORS. Singleton via `@lru_cache` |
+| `contracts.py` | `DeadlineResult`, `DraftedDocument`, `KnowledgeChunk`, `TipoPrazo`, `Tom` | Typed tool return envelopes (Pydantic BaseModel). Successes return these; errors return plain `str`. `Tom` is defined canonically here and re-exported by `tools/redigir.py`. |
 | `deps.py` | `Deps` | Dataclass injecting `settings` + `retriever` into agent tool calls |
 | `service.py` | `ChatService`, `AgentChatBackend`, `build_chat_service()` | Session management (OrderedDict, lock, history truncation), review gate, backend adapter |
 | `__init__.py` | `__version__` | Package version `"0.1.0"` |

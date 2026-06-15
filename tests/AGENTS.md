@@ -33,11 +33,11 @@ Unit and integration tests for the Advogado de Bolso application. Validates tool
 - `test_api.py` - FastAPI endpoint tests (health, chat, clear session)
 - `test_agent.py` - Agent construction and tool registration
 - `test_config.py` - Settings validation and properties
-- `test_calculos.py` - CDC deadline calculation logic
+- `test_calculos.py` - CDC deadline calculation logic (asserts on `DeadlineResult` fields for success; asserts `isinstance(result, str)` + substring matches for error paths)
 - `test_revisor.py` - Response review tool
 - `test_revision_result.py` - RevisionResult model validation
-- `test_redigir.py` - Document drafting tool
-- `test_rag_tool.py` - RAG search tool
+- `test_redigir.py` - Document drafting tool (asserts on `DraftedDocument.tipo`/`tom`/`destinatario`/`texto`; pins that `Tom` is the canonical `contracts.Tom` re-exported from `redigir`; pins that the "Responda APENAS com o texto final" sub-agent prompt is preserved per ISSUE-USR-017)
+- `test_rag_tool.py` - RAG search tool (asserts on `list[KnowledgeChunk]`; first chunk's `fonte` matches the node's `file_name`; empty retriever result returns `[]` — never a sentinel chunk per ISSUE-USR-017)
 - `test_knowledge_index.py` - KnowledgeIndex operations
 
 ## Verification

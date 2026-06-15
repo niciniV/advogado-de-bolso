@@ -2,11 +2,11 @@
 name = "advogado-de-bolso"
 version = "0.1.0"
 description = "Agentic chatbot helping Brazilian consumers with their rights"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.15"
 license = { text = "MIT" }
 authors = [{ name = "Advogado de Bolso contributors" }]
 dependencies = [
-    "pydantic-ai>=1.0.0",
+    "pydantic-ai>=1.106.0,<2.0.0",
     "pydantic-settings>=2.6.0",
     "python-dotenv>=1.0.1",
     "llama-index-core>=0.12.0",

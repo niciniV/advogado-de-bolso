@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from advogado_de_bolso.contracts import DraftedDocument, Tom
 from advogado_de_bolso.tools.redigir import TipoDocumento, redigir_documento
+from advogado_de_bolso.tools.redigir import Tom as RedigirTom
 
 
 @pytest.fixture
@@ -24,7 +26,7 @@ def mock_agent():
 
 class TestRedigirDocumento:
     @pytest.mark.asyncio
-    async def test_returns_drafted_text(self, ctx, mock_agent):
+    async def test_returns_drafted_document(self, ctx, mock_agent):
         result = await redigir_documento(
             ctx=ctx,
             tipo="email_cobranca",
@@ -33,7 +35,11 @@ class TestRedigirDocumento:
             destinatario="Cliente",
             tom="formal",
         )
-        assert result == "texto gerado pelo agente mockado"
+        assert isinstance(result, DraftedDocument)
+        assert result.tipo == "email_cobranca"
+        assert result.tom == "formal"
+        assert result.destinatario == "Cliente"
+        assert result.texto == "texto gerado pelo agente mockado"
 
     @pytest.mark.asyncio
     async def test_agent_created_with_correct_system_prompt(self, ctx, mock_agent):
@@ -60,7 +66,11 @@ class TestRedigirDocumento:
                 destinatario="Teste",
                 tom="cordial",
             )
-            assert result == "texto gerado pelo agente mockado"
+            assert isinstance(result, DraftedDocument)
+            assert result.tipo == tipo
+            assert result.tom == "cordial"
+            assert result.destinatario == "Teste"
+            assert result.texto == "texto gerado pelo agente mockado"
 
     @pytest.mark.asyncio
     async def test_agent_receives_model_settings(self, ctx, mock_agent):
@@ -89,6 +99,23 @@ class TestRedigirDocumento:
         assert "firme" in user_prompt
 
     @pytest.mark.asyncio
+    async def test_apenas_instruction_preserved_in_user_prompt(self, ctx, mock_agent):
+        """ISSUE-USR-017: the 'Responda APENAS com o texto final' safety
+        constraint must remain in the sub-agent's user prompt to prevent the
+        sub-agent from emitting JSON envelopes or surrounding commentary
+        that would have to be stripped before being placed in
+        DraftedDocument.texto."""
+        await redigir_documento(
+            ctx=ctx,
+            tipo="email_cobranca",
+            contexto="Teste",
+            objetivo="Teste",
+            destinatario="Teste",
+        )
+        user_prompt = mock_agent.return_value.run.call_args[0][0]
+        assert "APENAS" in user_prompt
+
+    @pytest.mark.asyncio
     async def test_invalid_tipo_raises_key_error(self, ctx):
         with pytest.raises(KeyError):
             await redigir_documento(
@@ -98,3 +125,16 @@ class TestRedigirDocumento:
                 objetivo="Teste",
                 destinatario="Teste",
             )
+
+
+class TestTomAlias:
+    """ISSUE-USR-017: `Tom` is defined canonically in `contracts.py`.
+    `tools/redigir.py` imports and re-exports it for backward compatibility
+    with downstream `from .redigir import Tom` imports."""
+
+    def test_tom_re_exported_from_redigir(self):
+        assert RedigirTom is Tom
+
+    def test_tom_values_match_canonical(self):
+        assert get_args(RedigirTom) == get_args(Tom)
+        assert set(get_args(RedigirTom)) == {"formal", "cordial", "firme"}

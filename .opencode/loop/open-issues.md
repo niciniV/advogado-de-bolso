@@ -1795,7 +1795,7 @@ Cross-cutting consistency checked against the 49 closed issues:
 
 **ISSUE-M3-019 [minor] "Resolved Open Decisions" section still references `RenameCaseRequest`** (docs drift)
 
-- **Status:** candidate
+- **Status:** closed
 - **originating-reviewer:** minimax-m3-reviewer
 - **affected:** `.opencode/plans/revised-integration-plan.md` (line 1241)
 - **description:** The "Resolved Open Decisions" section (plan line 1232-1287) has an entry "PUT vs PATCH for rename — RESOLVED: PATCH only" that states:
@@ -2376,7 +2376,7 @@ The 7 USR fixes are complete and self-consistent. No new M3-019+ candidate issue
 
 ### ISSUE-DEC-002 [meta, decomposition] — Minor: `06-service-class.md` line-count estimate slightly off
 
-- **Status:** candidate
+- **Status:** closed
 - **originating-reviewer:** mimo-reviewer
 - **affected:** `.opencode/loop/decomposition-proposal.md` (§4 table row for item 7)
 - **description:** The proposal estimates `06-service-class.md` at ~420 lines (source lines 394–805 = 412 source lines, plus ~5 lines of header = ~417). The actual source range is lines 394–805, which is 412 lines. The ~420 estimate is close but slightly high. More importantly, the proposal says the split is at "the natural class-boundary just before `_collect_tool_returns`" — but `_collect_tool_returns` starts at line 808 (in `07-service-helpers-and-backend.md`), so the split point is between line 805 (end of `get_history`) and line 808 (start of `_collect_tool_returns`). Lines 806–807 are the blank line and comment between the class and the module-scope helper. The proposal should clarify that lines 806–807 are excluded from both files (they are structural separators, not content). This is a documentation nit, not a functional concern.
@@ -2388,7 +2388,7 @@ The 7 USR fixes are complete and self-consistent. No new M3-019+ candidate issue
 
 ### ISSUE-DEC-003 [meta, decomposition] — Minor: `19-files-to-delete.md` content may need the `base_frontend/server.ts` context
 
-- **Status:** candidate
+- **Status:** closed
 - **originating-reviewer:** mimo-reviewer
 - **affected:** `.opencode/loop/decomposition-proposal.md` (§4 table row for item 20)
 - **description:** The proposal maps source lines 1286–1289 to `19-files-to-delete.md` (~10 lines). The source content is:
@@ -2444,7 +2444,7 @@ The 7 USR fixes are complete and self-consistent. No new M3-019+ candidate issue
 
 ### ISSUE-DEC-002 [meta] — package-lock.json section not explicitly mapped
 
-- **Status:** candidate
+- **Status:** closed
 - **originating-reviewer:** deepseek-reviewer
 - **deepseek-reviewer:** valid
 - **affected:** decomposition-proposal.md §4 table (row 11, 10-frontend-build-and-config.md)
@@ -2784,6 +2784,44 @@ None. My read scope was limited to files 11 and 18 (the 2 files flagged by mimo 
 
 - Re-read `.opencode/loop/open-issues.md` (2732 lines) immediately before editing. Last entries are the mimo round-24 section (lines 2686-2732) and the deepseek round-24 inline votes on PF-001 (line 2584) and PF-002 (line 2608).
 - Did not modify any pre-existing votes or notes from mimo, deepseek, or earlier rounds.
-- Appended my round-24 votes inline to ISSUE-PF-001 and ISSUE-PF-002 entries (after the deepseek-reviewer round-24 line, before the `affected-files` block).
-- Appended this round-24 minimax-m3 section at the end of `open-issues.md` (after the mimo round-24 section ending at line 2732).
+- Appended my round-24 votes inline to ISSUE-PF-001 and PF-002 entries (after the deepseek-reviewer round-24 line, before the `affected-files` block).
+- Appended this round-24 minimax-m3 section at the end of `opencode/loop/open-issues.md` (after the mimo round-24 section ending at line 2732).
 - Will append a compact entry to `.opencode/loop/review-log.md` and update `.opencode/loop/orchestration-state.md` with the round-24 m3 snapshot.
+
+---
+
+## Implementation Notes
+
+### Batch 1 — Typed tool contracts batch (IMPLEMENTED)
+
+- **Status:** implemented
+- **Implementation date:** 2026-06-15
+- **Subagent:** implementation (round 25)
+
+Batch 1 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.md`) is now complete. The typed tool return envelopes have been added and the three primary tools (`calculos`, `redigir`, `rag`) now return their success-shape objects.
+
+#### Files added
+
+- `src/advogado_de_bolso/contracts.py` — `DeadlineResult`, `DraftedDocument`, `KnowledgeChunk` Pydantic envelopes plus canonical `TipoPrazo` / `Tom` literal aliases.
+
+#### Files modified
+
+- `src/advogado_de_bolso/tools/calculos.py` — success path returns `DeadlineResult`; error paths (missing `tipo_item`, invalid date, invalid `tipo_prazo`) still return `str`.
+- `src/advogado_de_bolso/tools/redigir.py` — replaces the local `Tom = Literal[...]` declaration with the canonical import from `..contracts` (re-exported for backward compat); returns `DraftedDocument`; the "Responda APENAS com o texto final" sub-agent prompt is preserved (ISSUE-USR-017).
+- `src/advogado_de_bolso/tools/rag.py` — returns `list[KnowledgeChunk]`; empty retriever result returns `[]` (not a sentinel chunk, per ISSUE-USR-017); "fonte desconhecida" fallback preserved.
+- `tests/test_calculos.py` — rewritten: typed field assertions on `DeadlineResult` for success; `isinstance(result, str)` + substring matches for error paths.
+- `tests/test_redigir.py` — rewritten: typed field assertions on `DraftedDocument`; pins the canonical `Tom` re-export; pins the "APENAS" prompt preservation.
+- `tests/test_rag_tool.py` — rewritten: typed assertions on `list[KnowledgeChunk]`; pins `fonte` from `file_name` (with `node_id` and `"fonte desconhecida"` fallbacks); pins empty result is `[]`.
+- `pyproject.toml` — `requires-python = ">=3.11,<3.15"`; `pydantic-ai>=1.106.0,<2.0.0`. `uv.lock` regen deferred to a later batch (network access required).
+- DOX: `AGENTS.md` (root), `src/advogado_de_bolso/AGENTS.md`, `src/advogado_de_bolso/tools/AGENTS.md`, `tests/AGENTS.md` — File Map / role descriptions updated to reflect the new typed envelopes.
+
+#### Gate verification
+
+- `uv run pytest tests/test_calculos.py tests/test_redigir.py tests/test_rag_tool.py -v` — **32 passed**.
+- `uv run pytest -v` — **103 passed** (no regressions in the rest of the suite).
+
+#### Known follow-ups
+
+- `uv.lock` not yet regenerated. The next batch that runs `uv sync` (likely batch 4) should regenerate it; the resolver may pick up a slightly different transitive set given the new `pydantic-ai>=1.106.0,<2.0.0` upper bound.
+- The downstream adapter (batch 2) and `service.py` / `api.py` rewrites (batch 4) are still pending; the tools now produce the new envelopes but no consumer is yet dispatching on `isinstance(part.content, X)`.
+

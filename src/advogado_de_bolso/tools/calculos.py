@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Literal
 
-TipoPrazo = Literal["reclamacao_vicio", "arrependimento"]
+from advogado_de_bolso.contracts import DeadlineResult, TipoPrazo
 
 TipoItem = Literal[
     "produto_duravel",
@@ -38,16 +38,16 @@ def _calcular_reclamacao_vicio(
     data_inicio: date,
     tipo_item: TipoItem | None,
     vicio_oculto: bool,
-) -> str:
+) -> DeadlineResult:
     if tipo_item is None:
-        return (
+        raise ValueError(
             "Para calcular o prazo de reclamacao por vicio (CDC art. 26), "
             "e necessario informar o tipo do item. "
             f"Use um dos seguintes valores: {_TIPOS_VALIDOS}."
         )
 
     if tipo_item not in _PRAZOS_VICIO:
-        return (
+        raise ValueError(
             f"Tipo de item invalido: '{tipo_item}'. "
             f"Use um dos seguintes valores: {_TIPOS_VALIDOS}."
         )
@@ -55,40 +55,38 @@ def _calcular_reclamacao_vicio(
     dias = _PRAZOS_VICIO[tipo_item]
     limite = data_inicio + timedelta(days=dias)
 
-    item_label = tipo_item.replace("_", " ")
-
     if vicio_oculto:
-        trigger_explicacao = (
-            "a data em que o vicio oculto ficou evidente ao consumidor"
-        )
+        nota = "a data em que o vicio oculto ficou evidente ao consumidor"
     else:
-        trigger_explicacao = (
-            "a data de entrega do produto ou de conclusao do servico"
-        )
+        nota = "a data de entrega do produto ou de conclusao do servico"
 
-    return (
-        f"Pelo CDC art. 26, o prazo estimado para reclamar de vicio em "
-        f"{item_label} e de {dias} dias. "
-        f"Usando como data inicial {data_inicio.isoformat()}, "
-        f"a data limite estimada e {limite.isoformat()}.\n\n"
-        f"Atencao: este calculo depende da data inicial correta. "
-        f"Para vicio aparente ou de facil constatacao, use {trigger_explicacao}; "
-        f"para vicio oculto, use a data em que o defeito ficou evidente. "
-        f"Confirme os fatos concretos antes de concluir."
+    return DeadlineResult(
+        tipo_prazo="reclamacao_vicio",
+        data_inicio=data_inicio,
+        data_limite=limite,
+        dias=dias,
+        base_legal="CDC art. 26",
+        item_label=tipo_item,
+        vicio_oculto=vicio_oculto,
+        nota=nota,
     )
 
 
-def _calcular_arrependimento(data_inicio: date) -> str:
+def _calcular_arrependimento(data_inicio: date) -> DeadlineResult:
     limite = data_inicio + timedelta(days=7)
-    return (
-        f"Pelo CDC art. 49, o prazo para exercicio do direito de arrependimento "
-        f"e de 7 dias corridos. "
-        f"Usando como data inicial {data_inicio.isoformat()}, "
-        f"a data limite estimada e {limite.isoformat()}.\n\n"
-        f"Atencao: este calculo depende da data inicial correta. "
-        f"Use a data de recebimento do produto ou da contratacao do servico, "
-        f"nao necessariamente a data do pagamento. "
-        f"Confirme os fatos concretos antes de concluir."
+    return DeadlineResult(
+        tipo_prazo="arrependimento",
+        data_inicio=data_inicio,
+        data_limite=limite,
+        dias=7,
+        base_legal="CDC art. 49",
+        item_label=None,
+        vicio_oculto=False,
+        nota=(
+            "Use a data de recebimento do produto ou da contratacao do servico, "
+            "nao necessariamente a data do pagamento. Confirme os fatos "
+            "concretos antes de concluir."
+        ),
     )
 
 
@@ -97,7 +95,7 @@ def calcular_prazo_consumidor(
     data_inicio_prazo: str,
     tipo_item: TipoItem | None = None,
     vicio_oculto: bool = False,
-) -> str:
+) -> DeadlineResult | str:
     """Calcula prazos do CDC para reclamacao por vicio ou direito de arrependimento.
 
     Base legal:
@@ -117,15 +115,20 @@ def calcular_prazo_consumidor(
             Relevante apenas para reclamacao_vicio.
 
     Returns:
-        Texto com a data limite estimada, o artigo do CDC aplicavel e
-        advertencias sobre a data inicial correta.
+        Em caso de sucesso: `DeadlineResult` com a data limite estimada, o
+        artigo do CDC aplicavel e a data inicial correta. Em caso de erro
+        (data invalida, tipo de item ausente/invalido, tipo de prazo
+        desconhecido): uma string para o LLM retransmitir ao usuario.
     """
     parsed = _parse_data(data_inicio_prazo)
     if isinstance(parsed, str):
         return parsed
 
     if tipo_prazo == "reclamacao_vicio":
-        return _calcular_reclamacao_vicio(parsed, tipo_item, vicio_oculto)
+        try:
+            return _calcular_reclamacao_vicio(parsed, tipo_item, vicio_oculto)
+        except ValueError as exc:
+            return str(exc)
 
     if tipo_prazo == "arrependimento":
         return _calcular_arrependimento(parsed)

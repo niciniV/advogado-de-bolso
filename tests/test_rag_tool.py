@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from advogado_de_bolso.contracts import KnowledgeChunk
 from advogado_de_bolso.tools.rag import search_knowledge_base
 
 
@@ -18,13 +19,17 @@ def _make_node(score: float, file_name: str | None, node_id: str, content: str) 
 
 class TestSearchKnowledgeBase:
     @pytest.mark.asyncio
-    async def test_no_results_returns_message(self, ctx, mock_retriever):
+    async def test_no_results_returns_empty_list(self, ctx, mock_retriever):
+        """ISSUE-USR-017: empty RAG result is the empty list `[]`, NOT a
+        sentinel `KnowledgeChunk(fonte="sistema", ...)`. The adapter
+        handles the empty list via the `relevant_chunks` fallthrough."""
         mock_retriever.aretrieve.return_value = []
         result = await search_knowledge_base(ctx, "consulta sem resultados")
-        assert "Nenhum trecho relevante" in result
+        assert isinstance(result, list)
+        assert result == []
 
     @pytest.mark.asyncio
-    async def test_with_results_returns_formatted_chunks(self, ctx, mock_retriever):
+    async def test_with_results_returns_knowledge_chunks(self, ctx, mock_retriever):
         node = _make_node(
             score=0.95,
             file_name="cdc_art26.txt",
@@ -34,8 +39,11 @@ class TestSearchKnowledgeBase:
         mock_retriever.aretrieve.return_value = [node]
 
         result = await search_knowledge_base(ctx, "prazo reclamacao")
-        assert "Art. 26" in result
-        assert "cdc_art26.txt" in result
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert isinstance(result[0], KnowledgeChunk)
+        assert result[0].fonte == "cdc_art26.txt"
+        assert result[0].texto == "Art. 26 - Prazo para reclamar..."
 
     @pytest.mark.asyncio
     async def test_results_limited_by_top_k(self, ctx, mock_retriever):
@@ -46,9 +54,10 @@ class TestSearchKnowledgeBase:
         mock_retriever.aretrieve.return_value = nodes
 
         result = await search_knowledge_base(ctx, "teste", top_k=2)
-        assert "[1]" in result
-        assert "[2]" in result
-        assert "[3]" not in result
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert result[0].fonte == "doc0.txt"
+        assert result[1].fonte == "doc1.txt"
 
     @pytest.mark.asyncio
     async def test_uses_default_top_k_when_none(self, ctx, mock_retriever, settings):
@@ -59,12 +68,13 @@ class TestSearchKnowledgeBase:
         ctx.deps.settings.retrieval_top_k = 2
 
         result = await search_knowledge_base(ctx, "teste")
-        assert "[1]" in result
-        assert "[2]" in result
-        assert "[3]" not in result
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert result[0].fonte == "doc0.txt"
+        assert result[1].fonte == "doc1.txt"
 
     @pytest.mark.asyncio
-    async def test_fallback_source_when_no_file_name(self, ctx, mock_retriever):
+    async def test_fallback_source_uses_node_id(self, ctx, mock_retriever):
         node = _make_node(
             score=0.8,
             file_name=None,
@@ -74,8 +84,10 @@ class TestSearchKnowledgeBase:
         mock_retriever.aretrieve.return_value = [node]
 
         result = await search_knowledge_base(ctx, "consulta")
-        assert "fallback-node-id" in result
-        assert "Conteudo sem filename" in result
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].fonte == "fallback-node-id"
+        assert result[0].texto == "Conteudo sem filename"
 
     @pytest.mark.asyncio
     async def test_third_fallback_fonte_desconhecida(self, ctx, mock_retriever):
@@ -88,8 +100,10 @@ class TestSearchKnowledgeBase:
         mock_retriever.aretrieve.return_value = [node]
 
         result = await search_knowledge_base(ctx, "consulta")
-        assert "fonte desconhecida" in result
-        assert "Conteudo sem fonte alguma" in result
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].fonte == "fonte desconhecida"
+        assert result[0].texto == "Conteudo sem fonte alguma"
 
     @pytest.mark.asyncio
     async def test_sort_by_score_descending(self, ctx, mock_retriever):
@@ -100,7 +114,8 @@ class TestSearchKnowledgeBase:
         mock_retriever.aretrieve.return_value = nodes
 
         result = await search_knowledge_base(ctx, "teste", top_k=2)
-        assert result.index("Alta relevancia") < result.index("Baixa relevancia")
+        assert isinstance(result, list)
+        assert [c.fonte for c in result] == ["alto.txt", "baixo.txt"]
 
     @pytest.mark.asyncio
     async def test_nodes_with_none_score(self, ctx, mock_retriever):
@@ -109,13 +124,15 @@ class TestSearchKnowledgeBase:
         mock_retriever.aretrieve.return_value = [node]
 
         result = await search_knowledge_base(ctx, "consulta")
-        assert "Conteudo" in result
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].texto == "Conteudo"
 
     @pytest.mark.asyncio
     async def test_negative_top_k_falls_back_to_default(self, ctx):
         """A negative top_k should fall back to the config default, not slice backwards."""
         result = await search_knowledge_base(ctx, "test query", top_k=-1)
-        assert isinstance(result, str)
+        assert isinstance(result, list)
 
     @pytest.mark.asyncio
     async def test_top_k_cannot_expand_beyond_configured_limit(self, ctx, mock_retriever):
@@ -128,5 +145,16 @@ class TestSearchKnowledgeBase:
 
         result = await search_knowledge_base(ctx, "teste", top_k=5)
 
-        assert "[2]" in result
-        assert "[3]" not in result
+        assert isinstance(result, list)
+        assert len(result) == 2
+
+
+@pytest.mark.asyncio
+async def test_no_result_is_never_a_sentinel_knowledge_chunk(ctx, mock_retriever):
+    """ISSUE-USR-017: when retriever returns nothing, the function MUST
+    return `[]`, never a sentinel `KnowledgeChunk(fonte="sistema", ...)`."""
+    mock_retriever.aretrieve.return_value = []
+
+    result = await search_knowledge_base(ctx, "consulta vazia")
+    assert result == []
+    assert not (isinstance(result, list) and len(result) == 1 and result[0].fonte == "sistema")

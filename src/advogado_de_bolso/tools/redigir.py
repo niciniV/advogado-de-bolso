@@ -11,7 +11,10 @@ from typing import Literal
 
 from pydantic_ai import Agent, RunContext
 
+from advogado_de_bolso.contracts import DraftedDocument, Tom
 from advogado_de_bolso.deps import Deps
+
+__all__ = ["TipoDocumento", "Tom", "redigir_documento", "DraftedDocument"]
 
 TipoDocumento = Literal[
     "email_cobranca",
@@ -21,7 +24,6 @@ TipoDocumento = Literal[
     "recurso",
 ]
 
-Tom = Literal["formal", "cordial", "firme"]
 
 _SYSTEM_PROMPTS: dict[str, str] = {
     "email_cobranca": (
@@ -76,7 +78,7 @@ async def redigir_documento(
     objetivo: str,
     destinatario: str,
     tom: Tom = "formal",
-) -> str:
+) -> DraftedDocument:
     """Redige um documento pronto para o usuario enviar.
 
     Use esta ferramenta quando o usuario precisar de um texto pronto
@@ -91,7 +93,9 @@ async def redigir_documento(
         tom: Tom desejado - 'formal', 'cordial' ou 'firme'.
 
     Returns:
-        O texto final do documento, pronto para uso.
+        Um envelope `DraftedDocument` (tipo, tom, destinatario, texto) onde
+        `texto` e o texto final do documento gerado pelo sub-agente, pronto
+        para uso.
     """
     user_prompt = (
         f"Destinatario: {destinatario}\n"
@@ -110,4 +114,9 @@ async def redigir_documento(
         model=ctx.model,
         model_settings=ctx.deps.model_settings,
     )
-    return result.output
+    return DraftedDocument(
+        tipo=tipo,
+        tom=tom,
+        destinatario=destinatario,
+        texto=result.output,
+    )

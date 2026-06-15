@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pydantic_ai import RunContext
 
+from advogado_de_bolso.contracts import KnowledgeChunk
 from advogado_de_bolso.deps import Deps
 
 
@@ -11,16 +12,18 @@ async def search_knowledge_base(
     ctx: RunContext[Deps],
     query: str,
     top_k: int | None = None,
-) -> str:
+) -> list[KnowledgeChunk]:
     """Busca trechos relevantes na base de conhecimento sobre direito do consumidor.
 
     Args:
         query: Pergunta ou tema a ser buscado (ex: "prazo para reclamacao de vicio em produto duravel").
         top_k: Quantidade de trechos a retornar. Se omitido, usa o valor padrao de configuracao.
 
-    Retorna os trechos mais relevantes, cada um com a fonte (nome do arquivo).
-    Use esta ferramenta sempre que precisar fundamentar uma resposta em legislacao,
-    jurisprudencia, cartilhas do PROCON ou qualquer material indexado.
+    Returns:
+        Lista de `KnowledgeChunk` (fonte, texto) ordenados por relevancia
+        decrescente. Retorna lista vazia `[]` quando a base nao tem
+        trechos relevantes para a consulta (o adaptador trata o caso de
+        "sem resultados" via o fallthrough de `relevant_chunks`).
     """
     retriever = ctx.deps.retriever
     configured_k = ctx.deps.settings.retrieval_top_k
@@ -32,12 +35,11 @@ async def search_knowledge_base(
     nodes = sorted(nodes, key=lambda n: getattr(n, "score", 0.0) or 0.0, reverse=True)[:k]
 
     if not nodes:
-        return "Nenhum trecho relevante encontrado na base de conhecimento."
+        return []
 
-    chunks: list[str] = []
-    for i, node in enumerate(nodes, 1):
+    chunks: list[KnowledgeChunk] = []
+    for node in nodes:
         source = node.metadata.get("file_name") or node.node_id or "fonte desconhecida"
         text = node.get_content().strip()
-        chunks.append(f"[{i}] Fonte: {source}\n{text}")
-
-    return "\n\n---\n\n".join(chunks)
+        chunks.append(KnowledgeChunk(fonte=source, texto=text))
+    return chunks
