@@ -2825,3 +2825,34 @@ Batch 1 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.
 - `uv.lock` not yet regenerated. The next batch that runs `uv sync` (likely batch 4) should regenerate it; the resolver may pick up a slightly different transitive set given the new `pydantic-ai>=1.106.0,<2.0.0` upper bound.
 - The downstream adapter (batch 2) and `service.py` / `api.py` rewrites (batch 4) are still pending; the tools now produce the new envelopes but no consumer is yet dispatching on `isinstance(part.content, X)`.
 
+### Batch 2 — Schema/adapter batch (IMPLEMENTED)
+
+- **Status:** implemented
+- **Implementation date:** 2026-06-15
+- **Subagent:** implementation (round 26)
+
+Batch 2 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.md`) is now complete. The wire types for the HTTP API and the LLM-output → wire-response adapter are in place. The adapter is dispatched on `isinstance(part.content, X)` keyed by `part.tool_name`, exactly as the spec requires. The downstream `service.py` and `api.py` rewrites (batches 3 and 4) are now unblocked; `storage/cases.py` will import `ChatMessage` and `CaseSummary` from `schemas.py`.
+
+#### Files added
+
+- `src/advogado_de_bolso/schemas.py` — wire types: `StructuredChatRequest` / `StructuredChatResponse`, `CaseSummary`, `CaseResponse`, `ChatMessage`, `UpdateCaseRequest` plus the `CaseTitle = Annotated[str, StringConstraints(...)]`, `IconName = Literal[...]`, `ResponseStyle = Literal[...]` aliases. `StringConstraints` for `message` (stripped, 1-8000) and `title` (stripped, 1-120). `ConfigDict(extra="forbid")` + `model_validator` on `UpdateCaseRequest` (USR-005 / M3-008). `StructuredChatResponse.updated_at` and `.chat_history` have assembly-safe defaults (ISSUE-USR-015).
+- `src/advogado_de_bolso/adapter.py` — `extract_structured_response(prose, tool_returns, *, blocked=False, blocked_message=None) -> StructuredChatResponse` plus the three helpers `_extract_questions`, `_extract_suggestive_text`, `_derive_quick_replies`. The 3 regex patterns in `_QUESTION_PATTERNS` pin the ISSUE-USR-010 fix (numbered items must end in `?`; `Posso`/`Poderia`/`Pode`/`Consegue`/`Você poderia` patterns use non-capturing keyword alternatives so the full question is captured). The 3 quick-reply chip sets are exported as `_DEFAULT_QUICK_REPLIES`, `_DEADLINE_QUICK_REPLIES`, `_DOC_QUICK_REPLIES`. Empty prose triggers the `Análise inicial` / `""` fallback (ISSUE-004). Unknown tool names log a WARNING and are silently ignored (ISSUE-DS-006).
+- `tests/test_adapter.py` — 84 golden tests covering the wire types, the adapter dispatch contract, the three helpers (including dedup, 5-cap, `rstrip('?. ')`), the ISSUE-USR-010 regex fix, the ISSUE-004 empty-prose fallback, the ISSUE-DS-006 unknown-tool WARNING, the ISSUE-M3-010 tuple-as-Sequence acceptance, the `tool_plain` raw-object round-trip contract (ISSUE-006 / ISSUE-USR-009) exercised against a real Pydantic AI `TestModel` agent, and the end-to-end `tool_plain` → adapter dispatch.
+
+#### Files modified
+
+- DOX: `AGENTS.md` (root), `src/advogado_de_bolso/AGENTS.md`, `tests/AGENTS.md` — File Map / role descriptions / local contracts updated to reflect the new wire types and the adapter dispatch contract.
+
+#### Gate verification
+
+- `uv run pytest tests/test_adapter.py -v` — **84 passed**.
+- `uv run pytest -v` — **187 passed** (84 new + 103 existing; no regressions).
+- `uv run ruff check src/advogado_de_bolso/schemas.py src/advogado_de_bolso/adapter.py tests/test_adapter.py` — **All checks passed**.
+- `uv run mypy src/advogado_de_bolso/schemas.py src/advogado_de_bolso/adapter.py` — **Success: no issues found in 2 source files**.
+
+#### Known follow-ups
+
+- `schemas.py` and `adapter.py` are not yet consumed by `agent.py`, `service.py`, `api.py`, or `cli.py` — those modules are still under the pre-batch-4 design. The downstream batches (3 storage, 4 service/API) will wire them in.
+- The `StructuredChatResponse` constructor currently takes no `chat_history` argument from the adapter; the service layer is responsible for overwriting both `chat_history` and `updated_at` before returning to the API caller. The default-factory pattern means a caller that constructs the response directly (without supplying both fields) still gets a valid object (ISSUE-USR-015).
+- The `tool_plain` round-trip test pins only the in-memory `ToolReturnPart.content` shape. The JSON round-trip via `ModelMessagesTypeAdapter.validate_python` degrades typed envelopes to `dict` on reload; that is acknowledged in the adapter docstring and will be pinned at the service layer (per `.opencode/plans/15-backend-tests.md` test_service.py specs).
+

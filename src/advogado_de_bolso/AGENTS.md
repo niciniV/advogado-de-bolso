@@ -18,20 +18,24 @@ Core application package for the "Advogado de Bolso" chatbot - an agentic assist
 - Always recommend professional legal counsel for complex cases
 - Agent responses must be reviewed before delivery (revisor tool)
 - All settings loaded from environment variables via pydantic-settings
-- **Tool return shapes are typed envelopes** (`contracts.py`): `calcular_prazo_consumidor` returns `DeadlineResult` (success) or `str` (error path: missing `tipo_item`, invalid date, invalid `tipo_prazo`); `redigir_documento` returns `DraftedDocument`; `search_knowledge_base` returns `list[KnowledgeChunk]`. The adapter (added in a later batch) dispatches on `isinstance(part.content, X)` and ignores `str` returns.
+- **Tool return shapes are typed envelopes** (`contracts.py`): `calcular_prazo_consumidor` returns `DeadlineResult` (success) or `str` (error path: missing `tipo_item`, invalid date, invalid `tipo_prazo`); `redigir_documento` returns `DraftedDocument`; `search_knowledge_base` returns `list[KnowledgeChunk]`. The adapter (`adapter.py`) dispatches on `isinstance(part.content, X)` keyed by `part.tool_name` and gracefully ignores `str` returns and unknown tool names.
 - The `Tom` alias for `redigir_documento` is the canonical `contracts.Tom`; do not redeclare it locally in `tools/redigir.py`.
+- **Wire types** (`schemas.py`): all fields are snake_case and validated at the API boundary so a malformed request returns 422 BEFORE the service runs (ISSUE-REVIEW-007). `StructuredChatRequest` / `Response`, `CaseSummary` / `CaseResponse`, `ChatMessage`, and `UpdateCaseRequest` are the public HTTP types; `StructuredChatResponse.updated_at` and `.chat_history` have assembly-safe defaults (ISSUE-USR-015) so the adapter can construct the response before the service appends the current turn. `UpdateCaseRequest` has `model_config = ConfigDict(extra="forbid")` and a `model_validator` that rejects empty bodies (USR-005 / M3-008).
+- **Adapter dispatch contract** (`adapter.py`): `extract_structured_response(prose, tool_returns, *, blocked=False, blocked_message=None) -> StructuredChatResponse` is a pure function. Dispatch is by `tool_name` (string) and uses `isinstance(content, X)` to identify typed envelopes — this works in-memory because Pydantic AI stores the raw Python object on `ToolReturnPart.content` (per `BaseToolReturnPart.content: ToolReturnContent` in pydantic-ai>=1.106). Unknown tool names log a WARNING and are silently ignored (ISSUE-DS-006). The JSON round-trip degrades `content` to a `dict`; the typed-identity guarantee holds only in-memory. The adapter also extracts `questions` (regex over prose, 5-item cap, dedup), `suggestive_text` (last non-empty line, 200-char cap), and `quick_replies` (contextual: deadline / doc / default chip sets).
 
 ## File Map
 
 | File | Key Exports | Role |
 |------|-------------|------|
-| `agent.py` | `build_agent(settings)`, `SYSTEM_PROMPT` | Constructs Pydantic AI agent, registers all tools |
-| `api.py` | `create_app()`, `app`, `run()` | FastAPI app factory, `/api/chat` POST, `/api/health` GET, `/api/sessions/{id}` DELETE, static frontend mount |
-| `cli.py` | `app()` | Interactive REPL: `prompt_toolkit` input, `rich` markdown streaming, slash commands (`/sair`, `/limpar`, `/ajuda`, `/modelo`) |
+| `adapter.py` | `extract_structured_response`, `_extract_questions`, `_extract_suggestive_text`, `_derive_quick_replies`, `_DEFAULT_QUICK_REPLIES`, `_DEADLINE_QUICK_REPLIES`, `_DOC_QUICK_REPLIES` | **NEW (batch 2).** Pure function that turns agent prose + `ToolReturnPart`s into a `StructuredChatResponse`. Three helpers above the main entrypoint handle question / suggestive-text / quick-reply extraction. |
+| `agent.py` | `build_agent(settings)`, `SYSTEM_PROMPT` | Constructs Pydantic AI agent, registers all tools (still under the pre-batch-4 design; rewired in batch 4) |
+| `api.py` | `create_app()`, `app`, `run()` | FastAPI app factory, `/api/chat`, `/api/health`, session endpoints (still under the pre-batch-4 design; rewired in batch 4) |
+| `cli.py` | `app()` | Interactive REPL: `prompt_toolkit` input, `rich` markdown streaming, slash commands (`/sair`, `/limpar`, `/ajuda`, `/modelo`) (still under the pre-batch-4 design; rewired in batch 5) |
 | `config.py` | `Settings`, `get_settings()` | Pydantic BaseSettings: LLM keys, model, embedding, paths, API host/port, CORS. Singleton via `@lru_cache` |
 | `contracts.py` | `DeadlineResult`, `DraftedDocument`, `KnowledgeChunk`, `TipoPrazo`, `Tom` | Typed tool return envelopes (Pydantic BaseModel). Successes return these; errors return plain `str`. `Tom` is defined canonically here and re-exported by `tools/redigir.py`. |
 | `deps.py` | `Deps` | Dataclass injecting `settings` + `retriever` into agent tool calls |
-| `service.py` | `ChatService`, `AgentChatBackend`, `build_chat_service()` | Session management (OrderedDict, lock, history truncation), review gate, backend adapter |
+| `schemas.py` | `StructuredChatRequest`, `StructuredChatResponse`, `CaseSummary`, `CaseResponse`, `ChatMessage`, `UpdateCaseRequest`, `CaseTitle`, `IconName`, `ResponseStyle` | **NEW (batch 2).** Wire types for the HTTP API. All fields snake_case; `StringConstraints` for `message`/`title`; `Literal` aliases for `icon_name`/`response_style`; `ConfigDict(extra="forbid")` + `model_validator` on `UpdateCaseRequest`; `StructuredChatResponse.updated_at` and `.chat_history` have assembly-safe defaults. |
+| `service.py` | `ChatService`, `AgentChatBackend`, `build_chat_service()` | Session management (OrderedDict, lock, history truncation), review gate, backend adapter (still under the pre-batch-4 design; rewired in batch 4) |
 | `__init__.py` | `__version__` | Package version `"0.1.0"` |
 | `__main__.py` | - | Entry point: delegates to `cli.app()` |
 
