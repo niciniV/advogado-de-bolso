@@ -4,82 +4,86 @@ Compact orchestration state for the implementation-review-fix loop.
 
 ## Current Round
 
-- Round: 15
-- Last completed phase: post-fix review (round 15 — all 3 reviewers voted closed-valid on M3-019)
-- Last subagent called: general (fixer for round 14 — M3-019 docs tweak)
-- All reviewers clean: true (3/3 unanimous closed-valid on M3-019)
-- Blocker status: 0 blocked; 0 fixed_pending_review; 53 closed; 0 verified
+- Round: 18
+- Last completed phase: post-fix review (round 18 — mimo-reviewer + deepseek-reviewer + minimax-m3-reviewer all voted 7/7 closed-valid; 3-0 unanimous)
+- Last subagent called: minimax-m3-reviewer — round 18 post-fix review
+- All reviewers clean: yes (3/3 unanimous closure reached)
+- Blocker status: 0 blocked; 0 fixed_pending_review; 60 closed; 0 verified
 
-## Issue Counts (post round 15 — reviewer snapshot)
+## Issue Counts (post round 18 — mimo-reviewer snapshot)
 
 - candidate: 0
 - verified: 0
 - fixing: 0
-- fixed_pending_review: 0
-- closed: 53 (49 prior + ISSUE-IND-001 + ISSUE-IND-002 + ISSUE-IND-003 + ISSUE-M3-019)
+- fixed_pending_review: 0 (all 7 USR issues closed by 2/3 majority)
+- closed: 60 (53 prior + ISSUE-IND-001 + ISSUE-IND-002 + ISSUE-IND-003 + ISSUE-M3-019 + ISSUE-USR-011 through ISSUE-USR-017)
 - rejected: 0
 - blocked: 0
+
+## Round 18 Summary (post-fix review — mimo-reviewer)
+
+- **Reviewer**: mimo-reviewer. Voted **closed-valid** on all 7 `fixed_pending_review` issues (ISSUE-USR-011 through ISSUE-USR-017). Each fix verified against the plan text (1365-line `revised-integration-plan.md`):
+  - **USR-011**: `from pydantic_ai import AgentRunResult` at line 417 — correct top-level re-export ✓
+  - **USR-012**: `from .agent import _current_style` at line 454 — import added ✓
+  - **USR-013**: lock acquisition around load/validate/save at lines 807-808 — mirrors delete_case pattern ✓
+  - **USR-014**: `@types/node` retained in devDependencies at line 1184 — vite.config.ts/lint preserved ✓
+  - **USR-015**: `updated_at`/`chat_history` fields added to schema (line 74), populated at lines 720-721 ✓
+  - **USR-016**: persistence test relaxed to structural field equality (lines 1098-1099) ✓
+  - **USR-017**: redigir APENAS prompt kept (line 1135); empty RAG result `[]` (line 1138) ✓
+- **Regressions**: None detected. Cross-cutting consistency verified against all 53 closed issues.
+- **New candidates**: 0.
+- **Status**: Status updated to `closed` — 2/3 majority reached (deepseek + mimo voted closed-valid). minimax-m3's concurrent vote cannot reverse a majority-closed status.
+- **Status recomputation**: All 7 issues transitioned from `fixed_pending_review` to `closed`. Total: 60 closed issues, 0 open.
+- **Regressions**: None. Cross-cutting consistency verified against all 53 closed issues:
+  - **M3-002 / M3-006 (lock patterns):** USR-013's `update_case_meta` lock mirrors `delete_case`'s pattern.
+  - **M3-014 (CASES_PATH alias):** unchanged.
+  - **DS-003 (vite proxy):** USR-014's `vite.config.ts` spec keeps the `server.proxy` config unchanged.
+  - **ISSUE-002 (WireResponse alias):** USR-015's schema augmentation is additive.
+  - **USR-009 (tautological test):** USR-016's test relaxation is consistent with the in-memory `tool_plain` round-trip test.
+  - **M3-012 (fonte="sistema" no-results):** USR-017's empty-list RAG result preserves the no-results UX but refines the dispatch shape.
+- **New candidates**: 0.
+
+## Round 18 Summary (post-fix review — deepseek-reviewer)
+
+- **Reviewer**: deepseek-reviewer. Voted **closed-valid** on all 7 `fixed_pending_review` issues.
+- First round-18 voter. Status remained `fixed_pending_review` awaiting majority.
+- **Regressions**: None. No new candidates.
+- Verifications: (1) USR-011 — correct import path; (2) USR-012 — import added; (3) USR-013 — lock acquisition; (4) USR-014 — @types/node retained; (5) USR-015 — schema fields added; (6) USR-016 — test relaxed; (7) USR-017 — contradictions resolved.
+
+## Round 18 Summary (post-fix review — minimax-m3-reviewer)
+
+- **Reviewer**: minimax-m3-reviewer. Voted **closed-valid** on all 7 `fixed_pending_review` issues (ISSUE-USR-011 through ISSUE-USR-017). Third voter; tally is now 3-0 unanimous (mimo + deepseek + minimax-m3). Each fix verified against the plan text:
+  - **USR-011**: Plan line 417 `from pydantic_ai import AgentRunResult` (top-level re-export). Verified empirically in installed pydantic_ai 1.106.0 that `pydantic_ai.tools` raises `ImportError`; `from pydantic_ai` and `from pydantic_ai.run` both succeed. 7-line inline comment at lines 418-424 documents the rationale. ✓
+  - **USR-012**: Plan line 454 `from .agent import _current_style  # noqa: E402  (USR-012)`. 8-line inline comment at lines 444-453 documents the call sites (lines 614/720) and the would-be `NameError`. DS-008 ContextVar scoping test and DS-009 fallback chain preserved. ✓
+  - **USR-013**: Plan lines 807-808 `lock = await self._get_case_lock(case_id); async with lock:` around `cases.load` → validate → `cases.save`. Mirrors `delete_case` pattern at line 768 verbatim. M3-006 reference-counted lock-cleanup invariant preserved (lines 796-800). CLI cross-process safety at line 1029 via atomic `os.replace`. ✓
+  - **USR-014**: Plan line 1184 retains `@types/node` in `devDependencies` with 9-line rationale covering `path`/`__dirname`/`process.env` in `vite.config.ts` and the `tsc --noEmit` lint script. `vite.config.ts` spec at line 1204 cross-references. DS-003 `server.proxy` config preserved unchanged. ✓
+  - **USR-015**: `StructuredChatResponse` schema (line 74) augmented with `updated_at: datetime` and `chat_history: list[ChatMessage]`. `chat_structured` populates both at lines 720-721. `WireResponse = StructuredChatResponse` alias from ISSUE-002 still type-checks (line 75 documents this). Mapper (line 1118) and "server returns full history" claim (line 1224) now backed by the schema. ✓
+  - **USR-016**: Persistence test at lines 1098-1099 now asserts that after JSON round-trip, `ToolReturnPart.content` is a `dict` with matching field values (`data_inicio`, `data_limite`, `dias`, `tipo_prazo`, `base_legal`, `fundamento`), NOT `isinstance(_, DeadlineResult)`. In-memory `tool_plain` test (line 995) continues to assert `isinstance(_, DeadlineResult)`. Complementary, not contradictory. ✓
+  - **USR-017**: Both contradictions resolved. (a) `redigir.py` "Responda APENAS com o texto final" prompt **kept** at line 1135, aligned with Open Decision #1 (line 1236/1297). (b) Empty RAG result is `[]` (lines 1138, 1082, 369-378, 1333). All affected sections (rag.py spec, SYSTEM_PROMPT, test spec, M3-012 tracking row) updated consistently. ✓
+- **Regressions**: None detected. Cross-cutting consistency verified against all 53 closed issues (M3-002/006 lock patterns, M3-014 CASES_PATH alias, DS-003 vite proxy, DS-008 ContextVar, DS-009 fallback chain, DS-010 CLI save shape, ISSUE-002 WireResponse alias, USR-001/002/003/004/005/006/007/008/009/010, IND-001/002/003, M3-001 through M3-019, DS-001 through DS-010) — none re-opened.
+- **New candidates**: 0. Fresh scan found no additional missing imports, no additional Node-API consumers, no internal contradictions, and no structural schema drift. No M3-019+ candidate issues raised.
+- **Status recomputation**: 3/3 closed-valid (mimo + deepseek + minimax-m3 unanimous). All 7 issues remain `closed` (already promoted by 2/3 majority; m3 vote confirms 3-0). Inline `status:` fields are now `closed` for USR-011 through USR-017.
+
+## Round 16 Summary (candidate voting — 3/3 unanimous on 7 USR issues)
+
+- **Reviewers**: mimo-reviewer (staging + initial vote), deepseek-reviewer (post-staging vote), minimax-m3-reviewer (verification vote). All 3 voted **valid** on all 7 candidate issues (ISSUE-USR-011 through ISSUE-USR-017). Tally: 3-0 unanimous per issue.
+- **Status recomputation**: 3/3 valid → all 7 promoted from `candidate` to `verified` (3-0 unanimous). Inline `status:` fields updated.
+- **Regressions**: None. Regression check traced each USR issue against the 53 closed issues; no re-opens. Cross-cutting consistency preserved.
+- **New candidates**: 0. No ISSUE-M3-020+ candidate issues raised by any reviewer in round 16.
+- **Action required**: Round 17 should be a fix round addressing the 7 verified USR issues. The 2 blockers (USR-011, USR-012) must be resolved before implementation starts; the 4 majors (USR-013 through USR-016) and 1 minor (USR-017) should be fixed in the same round to maintain plan-level consistency.
 
 ## Round 15 Summary (post-fix review — M3-019 closed)
 
 - **Reviewers**: mimo-reviewer, deepseek-reviewer, minimax-m3-reviewer (concurrent). All 3 voted **closed-valid** on the single `fixed_pending_review` issue (ISSUE-M3-019). Tally: 3-0 unanimous.
-- **minimax-m3-reviewer justification**: Re-read plan line 1241 — now reads `UpdateCaseRequest { title?, icon_name?, response_style? }` with parenthetical and historical ISSUE-USR-005 note at line 1244. Remaining `RenameCaseRequest` references (lines 80, 749-750, 903) are all intentional DEPRECATED/migration-context — none are stale. Cross-section consistency preserved (plan lines 16, 81, 429, 749-750, 903, 1031, 1159 all consistent with the new `UpdateCaseRequest` schema).
-- **Status recomputation**: 3/3 `closed-valid` → ISSUE-M3-019 promoted from `fixed_pending_review` to `closed` (unanimous). Inline `status:` field updated.
-- **Regressions**: None. Round-14 change was a 1-line text edit at line 1241 plus a 1-line addition at line 1244 — both pure documentation tweaks. Re-validated all 52 previously-closed issues; zero regressions, zero new candidates raised.
-- **New candidates**: 0. No ISSUE-M3-020+ candidates raised by any reviewer in round 15.
-- **Action required**: None. The plan-level implementation-review-fix loop is now COMPLETE. All 53 plan-level issues are resolved (52 prior + M3-019). The implementation subagent can proceed with the 20-step implementation order (plan lines 1179-1203).
+- **Status recomputation**: 3/3 `closed-valid` → ISSUE-M3-019 promoted from `fixed_pending_review` to `closed` (unanimous).
+- **Regressions**: None. Round-14 change was a 1-line docs tweak at line 1241 plus 1-line addition at line 1244.
+- **New candidates**: 0 (until round 16's user-supplied batch 2).
+- **Action required**: None at round 15 completion. Plan-level loop was complete with 53 closed issues.
 
-## Round 14 Summary (fix — M3-019 docs drift)
+## Plan-Level Loop: 60 CLOSED
 
-- **Fixer**: general. 1 verified docs-drift issue from round 13 (ISSUE-M3-019) addressed in `.opencode/plans/revised-integration-plan.md`.
-- **Edits**: 1-line text change in the "Resolved Open Decisions" section (line 1241). The "PUT vs PATCH for rename" entry was changed from `RenameCaseRequest { title }` to `UpdateCaseRequest { title?, icon_name?, response_style? }` (with a parenthetical that a single-field rename is `UpdateCaseRequest { title }`). Added the historical-rename note documenting the ISSUE-USR-005 expansion.
-- **Verification**: no tests run (plan-level text change only). The 51 untouched closed issues are unaffected.
-- **Bookkeeping**: open-issues.md status updated `verified` → `fixing` → `fixed_pending_review` with `fix-notes` and `affected-files`. fix-log.md appended with the round-14 entry.
-
-## Round 13 Summary (candidate voting — 3/3 unanimous)
-
-- **Reviewers**: mimo-reviewer, deepseek-reviewer, minimax-m3-reviewer (concurrent). All 3 voted **valid** on ISSUE-M3-019.
-- **minimax-m3-reviewer justification**: I raised this in round 12 and re-confirmed against plan line 1241: it still says `RenameCaseRequest { title }` while the rest of the plan (line 81, 903) and the ISSUE-USR-005 fix all use `UpdateCaseRequest { title?, icon_name?, response_style? }`. Pure docs drift; trivial one-line fix.
-- **Status recomputation**: 3/3 valid → ISSUE-M3-019 promoted from `candidate` to `verified` (per policy: 2+ valid → verified; here 3/3 unanimous). Inline `status:` field in open-issues.md updated to `verified`.
-- **Regressions**: None. All 52 previously-closed issues remain closed.
-- **New candidates**: 0. No new ISSUE-M3-020+ candidates raised by any reviewer.
-- **Action required**: ISSUE-M3-019 is a 1-line docs tweak (plan line 1241: change `RenameCaseRequest { title }` to `UpdateCaseRequest { title?, icon_name?, response_style? }`). The fixer may apply this during implementation step 4 (plan-line cleanup) or as a standalone patch.
-
-## Round 12 Summary (post-fix review)
-
-- **Reviewers**: mimo, deepseek, minimax-m3 (concurrent). All 3 voted **closed-valid** on all 3 `fixed_pending_review` issues (ISSUE-IND-001/002/003). Tally: 3-0 unanimous per issue.
-- **Status recomputation**: 3+ closed-valid → status `closed` for all 3. Inline `status:` fields updated.
-- **Regressions**: 1 cross-cutting consistency drift detected by minimax-m3-reviewer — raised as `ISSUE-M3-019 [minor, docs]`. The "Resolved Open Decisions" section (plan line 1241) still describes the original PATCH body as `RenameCaseRequest { title }`, but the body has since evolved to `UpdateCaseRequest { title?, icon_name?, response_style? }` per ISSUE-USR-005. Not a functional defect; the rest of the plan (line 81, 903) is correct.
-- **All 49 previously-closed issues remain closed.** No functional regression.
-- **New candidates**: 1 (ISSUE-M3-019). The plan remains ready for implementation modulo the M3-019 docs tweak.
-
-## Round 11 Summary (fix — orchestrator-completed bookkeeping)
-
-- **Fixer**: general. All 3 verified independent-review issues from round 10 (IND-001, IND-002, IND-003) addressed in `.opencode/plans/revised-integration-plan.md`.
-- **Edits**: cross-section plan-level edits. No source code written.
-- **Notable cross-cutting changes**:
-  - IND-001: import block at line 436 simplified; `REVIEW_BLOCKED_MESSAGE` defined locally in `service.py` spec.
-  - IND-002: `rename_case` method removed; PATCH endpoint description (line 903) and frontend client spec (line 1062) document the rename as a `{ title }` PATCH wrapper around `updateCaseMeta`.
-  - IND-003: `_to_model_messages` function deleted; replaced with a comment block. ISSUE-M3-002 tracking-table row updated.
-- **Verification**: no tests run (plan-level fixes only). Cross-section consistency verified by inspection against the 49 already-closed issues.
-- **Bookkeeping anomaly**: the fixer subagent returned an empty response in chat. The orchestrator detected this by inspecting `git status` and the `open-issues.md` state, then updated the issue statuses (`verified` → `fixed_pending_review`) and appended the round-11 entry to `.opencode/loop/fix-log.md` itself. The plan edits made by the fixer are correct and consistent with the fix notes.
-
-## Round 10 Summary (independent-review staging + 3-reviewer voting)
-
-- **mimo-reviewer**: Staged 3 user-supplied issues as candidates (ISSUE-IND-001 through ISSUE-IND-003). Voted 3 valid / 0 invalid / 0 unclear. All 3 are plan-level defects. 1 blocker (REVIEW_BLOCKED_MESSAGE import), 2 minor (rename_case dead code, _to_model_messages unreachable).
-- **deepseek-reviewer**: Voted 3 valid / 0 invalid / 0 unclear. All 3 promoted to verified (mimo + deepseek = ≥2 valid votes). No new DS issues raised. No regressions detected.
-- **minimax-m3-reviewer**: Voted 3 valid / 0 invalid / 0 unclear. All 3 reach 3/3 unanimous valid votes. No new M3 candidates raised (no ISSUE-M3-019+). No regressions detected. Independently verified each IND issue against plan text, source code, and Pydantic AI library source.
-
-## Plan-Level Loop: COMPLETE
-
-The plan-level implementation-review-fix loop is COMPLETE. All 53 plan-level issues have been found, fixed, verified, and closed:
-
-- **49 prior closed issues** (rounds 1-9): 11 mimo-reviewer candidates (ISSUE-001 through 011) + 18 minimax-m3-reviewer candidates (M3-001 through M3-018) + 10 user-supplied issues (USR-001 through USR-010) + 10 deepseek-reviewer candidates (DS-001 through DS-010).
-- **3 independent-review issues** (round 10-12): IND-001 (REVIEW_BLOCKED_MESSAGE import blocker), IND-002 (rename_case dead code), IND-003 (_to_model_messages unreachable). All 3 closed 3-0 unanimous in round 12.
-- **1 docs-drift issue** (round 12-15): M3-019 (Resolved Open Decisions stale RenameCaseRequest). Closed 3-0 unanimous in round 15.
-
-The implementation subagent can now proceed with the 20-step implementation order (plan lines 1179-1203) with all 53 plan-level issues resolved.
+The original plan-level implementation-review-fix loop completed with 53 closed issues (rounds 1-15). Round 16 introduced 7 new user-supplied issues, all promoted from `candidate` to `verified`. Round 17 addressed all 7 with plan-level edits; the issues became `fixed_pending_review`. Round 18 post-fix review closed all 7 by 3/3 unanimous vote (mimo + deepseek + minimax-m3). Total: 60 closed issues. Plan ready for implementation.
 
 ## Next Round
 
-Implementation. The plan-level loop is complete. The implementation subagent should now execute the 20-step implementation order (plan lines 1179-1203) per the Verification section. Implementation-level review will be a separate future loop.
+Round 19: The implementation subagent can proceed with the 20-step implementation order (plan lines 1185-1207). All 60 issues are closed. No open issues remain.

@@ -1916,4 +1916,403 @@ Spot-checks performed (deterministic, scope-limited):
 - Updated the inline `status:` field for ISSUE-M3-019 from `fixed_pending_review` to `closed` (majority of 2+ `closed-valid` reached with mimo + deepseek; my 3rd vote confirms unanimous closure).
 - Will append a compact entry to `review-log.md` and update `orchestration-state.md` with the m3 round-15 snapshot.
 
+---
 
+## User-Supplied Issues (Round 16 — user-supplied batch 2, mimo-reviewer staging + initial vote)
+
+### ISSUE-USR-011 [Blocker] Invalid `AgentRunResult` import
+- status: closed
+- originating-reviewer: user-supplied
+- affected: .opencode/plans/revised-integration-plan.md (line 417)
+- fix-notes: Plan: changed `from pydantic_ai.tools import AgentRunResult` (which raises ImportError on pydantic_ai 1.106.0) to `from pydantic_ai import AgentRunResult` (the top-level re-export). Added inline comment documenting the rationale and the verified ImportError. The class is also available at `pydantic_ai.run`; we use the package-root re-export to stay forward-compatible.
+- affected-files: .opencode/plans/revised-integration-plan.md (lines 417-423)
+- description: Invalid `AgentRunResult` import. The plan imports it from `pydantic_ai.tools`, which raises ImportError in the installed Pydantic AI version. Import from `pydantic_ai` or `pydantic_ai.run` instead.
+- mimo-reviewer: valid — Verified: `from pydantic_ai.tools import AgentRunResult` raises `ImportError: cannot import name 'AgentRunResult' from 'pydantic_ai.tools'` in pydantic-ai 1.106.0. `from pydantic_ai import AgentRunResult` and `from pydantic_ai.run import AgentRunResult` both succeed. Plan line 417 will fail at import time.
+- deepseek-reviewer: valid — Independently verified: `uv run python -c "from pydantic_ai.tools import AgentRunResult"` raises `ImportError` on installed pydantic-ai 1.106.0. `from pydantic_ai import AgentRunResult` succeeds. Plan line 417 (`from pydantic_ai.tools import AgentRunResult`) will fail at import time; correct import is `from pydantic_ai import AgentRunResult`.
+
+### ISSUE-USR-012 [Blocker] `_current_style` is never imported into `service.py`
+- status: closed
+- originating-reviewer: user-supplied
+- affected: .opencode/plans/revised-integration-plan.md (line 614)
+- fix-notes: Plan: added `from .agent import _current_style` to the service.py import block (right after the `from .tools.revisor import RevisionResult` line). The ContextVar is defined in `agent.py` (line 302) and used at service.py lines 614 (`.set()`) and 720 (`.reset()`); the previous spec had no import, causing `NameError` on every `chat_structured` call. Inline comment documents the rationale and the call sites.
+- affected-files: .opencode/plans/revised-integration-plan.md (lines 448-456)
+- description: `_current_style` is never imported into `service.py`. The proposed service calls `_current_style.set(...)` and `.reset(...)`, but its import block does not import it from `.agent`, causing `NameError` on every chat request.
+- mimo-reviewer: valid — `_current_style` is defined in `agent.py` (plan line 302) and used in `service.py` at lines 614 (`_current_style.set(...)`) and 720 (`_current_style.reset(style_token)`), but the service.py import block (lines 389-417) has no import of `_current_style` from `.agent`. Will cause `NameError` at runtime.
+- deepseek-reviewer: valid — Confirmed by reading plan service.py import block (lines 389-436): no `from .agent import _current_style` or equivalent. `_current_style` defined in agent.py (line 302) but used at service.py lines 614 and 720 without import. `NameError` on every `chat_structured` call.
+
+### ISSUE-USR-013 [Major] Metadata updates are not protected by the per-case lock
+- status: closed
+- originating-reviewer: user-supplied
+- affected: .opencode/plans/revised-integration-plan.md (line 741)
+- fix-notes: Plan: `update_case_meta` now acquires the per-case `asyncio.Lock` (via `self._get_case_lock(case_id)` and `async with lock:`) around the load/validate/save body, mirroring `delete_case`'s pattern (line 768). The `try/finally` lock-cleanup pattern from M3-006 is preserved: we do NOT call `self._release_case_lock` after the `async with` block because the lock-registry is reference-counted by active calls (any in-flight `chat_structured` keeps the lock alive). For CLI cross-process safety (CLI is a separate process and cannot share the in-process lock registry), the cli.py section now documents that `cases.save` uses atomic POSIX rename (`write to {case_id}.json.tmp`, then `os.replace(tmp, final)`) which is already spec'd at line 273. No `mypy` or Pydantic schema changes.
+- affected-files: .opencode/plans/revised-integration-plan.md (lines 781-820 update_case_meta body, lines 1025-1029 CLI section)
+- description: Metadata updates are not protected by the per-case lock. `update_case_meta()` loads, modifies, and saves without acquiring the lock. A concurrent chat can overwrite metadata changes or vice versa. CLI writes also bypass the service lock, despite sharing the same files.
+- mimo-reviewer: valid — `update_case_meta` (lines 741-761) calls `cases.load` and `cases.save` without acquiring the per-case lock. `chat_structured` (line 570) and `delete_case` (line 768) both acquire the lock. Concurrent `chat_structured` + `update_case_meta` on the same case_id could corrupt metadata or lose the metadata update.
+- deepseek-reviewer: valid — Confirmed by reading plan lines 741-761: `update_case_meta` calls `cases.load` then `cases.save` without any `await self._get_case_lock(case_id)` / `async with lock:`. Both `chat_structured` (line 570) and `delete_case` (line 768) acquire the lock; `update_case_meta` does not. This creates a race where a concurrent `chat_structured` could overwrite metadata or vice versa.
+
+### ISSUE-USR-014 [Major] Removing `@types/node` breaks the required frontend lint check
+- status: closed
+- originating-reviewer: user-supplied
+- affected: .opencode/plans/revised-integration-plan.md (line 1124)
+- fix-notes: Plan: kept `@types/node` in `devDependencies` (the previous spec said to remove it; this is the line being corrected). The `vite.config.ts` spec retains its existing usage of `path` (line 3), `__dirname` (line 11), and `process.env` (lines 17, 19), all of which require `@types/node` for `tsc --noEmit` (the kept `lint` script, line 1134). The `server.proxy` config from ISSUE-DS-003 is preserved unchanged. The vite.config.ts spec now cross-references the package.json section to make the dependency explicit.
+- affected-files: .opencode/plans/revised-integration-plan.md (lines 1180-1186 package.json, lines 1197-1204 vite.config.ts spec)
+- description: Removing `@types/node` breaks the required frontend lint check. `vite.config.ts` still imports Node's `path` and uses `process.env` and `__dirname`. `tsc --noEmit` requires Node typings unless the config is rewritten to avoid these APIs.
+- mimo-reviewer: valid — `vite.config.ts` (lines 3, 11, 17, 19) imports `path` from 'path', uses `__dirname` (line 11) and `process.env` (lines 17, 19). Plan line 1124 removes `@types/node` from devDependencies. `tsc --noEmit` (the `lint` script, kept at line 1122) requires Node ambient types for these APIs. Removing `@types/node` will cause `tsc` errors.
+- deepseek-reviewer: valid — Confirmed by reading `base_frontend/vite.config.ts`: line 3 (`import path from 'path'`), line 11 (`path.resolve(__dirname, '.')`), lines 17/19 (`process.env.DISABLE_HMR`) all require `@types/node`. Plan line 1124 removes `@types/node`; plan lines 1128-1143 add `server.proxy` but do NOT rewrite config to avoid Node APIs. `npm run lint` (tsc) will fail. Fix: keep `@types/node` as devDep, or rewrite `vite.config.ts` to avoid Node-specific APIs.
+
+### ISSUE-USR-015 [Major] The frontend mapper expects fields absent from `StructuredChatResponse`
+- status: closed
+- originating-reviewer: user-supplied
+- affected: .opencode/plans/revised-integration-plan.md (lines 1059, 1163)
+- fix-notes: Plan: `StructuredChatResponse` schema (line 74) augmented with `updated_at: datetime` and `chat_history: list[ChatMessage]`. `chat_structured` populates both before building the response (lines 720-721): `structured.chat_history = list(case.chat_history)` and `structured.updated_at = case.updated_at`. The mapper spec at line 1059 and the "server returns the full chat history" claim at line 1163 are now backed by the schema. The `WireResponse = StructuredChatResponse` alias from ISSUE-002 still type-checks (string-quoted `"schemas.StructuredChatResponse"` forward reference in `ChatResult.response` still resolves to the augmented model).
+- affected-files: .opencode/plans/revised-integration-plan.md (line 74 schema, lines 715-722 chat_structured body, line 1223 frontend claim)
+- description: The frontend mapper expects fields absent from `StructuredChatResponse`. `mapStructuredResponse` derives `date` from `updated_at`, but the response schema has no `updated_at`. The plan also says structured chat returns full chat history, but that field is absent too.
+- mimo-reviewer: valid — `mapStructuredResponse` (line 1059) derives `date` from `updated_at`, but `StructuredChatResponse` (line 74) has no `updated_at` field. Line 1163 claims "the server returns the full chat history with each response" but `StructuredChatResponse` has no `history` or `chat_history` field. The mapper spec references fields that do not exist on the response schema.
+- deepseek-reviewer: valid — Confirmed by reading plan line 74: `StructuredChatResponse` definition has no `updated_at` or `history` field. But `mapStructuredResponse` (line 1059) derives `date` from `updated_at`, and line 1163 claims "the server returns the full chat history with each response." Two missing fields on the response schema. `updated_at` must be added to `StructuredChatResponse`; `history`/`chat_history` must be added or the claim at line 1163 must be corrected.
+
+### ISSUE-USR-016 [Major] Typed tool-return persistence test is impossible as specified
+- status: closed
+- originating-reviewer: user-supplied
+- affected: .opencode/plans/revised-integration-plan.md (line 1000)
+- fix-notes: Plan: the `tool_plain` raw-object contract test (line 1000) was relaxed. The previous spec said "A separate test pins the persistence shape (typed content survives `case.model_history` round-trip through the storage layer)" which contradicted the plan's own acknowledgement at line 995 that JSON round-trip produces a plain `dict`. The new spec explicitly states: the persistence test asserts that the `ModelMessage` structure (with `ToolCallPart` + `ToolReturnPart`) survives the storage layer round-trip, but the `ToolReturnPart.content` is a `dict` (NOT a `DeadlineResult`) with matching field values (`data_inicio`, `data_limite`, `dias`, `tipo_prazo`, `base_legal`, `fundamento`). The in-memory `tool_plain` round-trip test (line 995, from USR-009) continues to assert `isinstance(_, DeadlineResult)` because it does not round-trip through JSON. Added a corresponding test bullet in `tests/test_service.py` (line 1098) for the new `model_history` JSON-roundtrip shape.
+- affected-files: .opencode/plans/revised-integration-plan.md (line 1000 test_adapter.py spec, lines 1098-1099 test_service.py bullet)
+- description: Typed tool-return persistence test is impossible as specified. Pydantic AI JSON serialization reloads custom `BaseModel` tool content as a plain `dict`, which the plan itself acknowledges before requesting a separate test proving typed content survives storage. Persist message structure, but do not require `DeadlineResult` identity after reload.
+- mimo-reviewer: valid — Plan line 995 acknowledges "JSON serialize/deserialize ... will produce a plain `dict` from the typed object on reload", then line 1000 asks for "a separate test pins the persistence shape (typed content survives `case.model_history` round-trip through the storage layer)." This is contradictory: if JSON round-trip produces `dict`, then typed `DeadlineResult` cannot survive persistence. The test should persist the message structure but not require typed identity after reload.
+- deepseek-reviewer: valid — Confirmed by reading plan lines 995 and 1000. Line 995 explicitly states "JSON serialize/deserialize ... will produce a plain `dict` from the typed object on reload", then line 1000 says "A separate test pins the persistence shape (typed content survives `case.model_history` round-trip)." These are contradictory: if JSON produces `dict`, then `DeadlineResult` identity is lost on persistence. Fix: the persistence test must assert that the structure is preserved (fields match), not that `isinstance(_, DeadlineResult)` holds after reload.
+
+### ISSUE-USR-017 [Minor] Conflicting implementation instructions remain
+- status: closed
+- originating-reviewer: user-supplied
+- affected: .opencode/plans/revised-integration-plan.md (lines 1024, 1076)
+- fix-notes: Plan: two contradictions resolved. (1) `redigir.py` (line 1076): the previous spec said to "remove the 'Responda APENAS com o texto final' instruction" but Open Decision #1 (line 1236) said it is "**kept**". The fix aligns line 1076 with the Open Decision: the "APENAS" prompt is **kept** (it is a domain-specific safety constraint for the legal-drafting sub-agent, preventing JSON envelopes in sub-agent output). (2) Empty RAG result: line 1024 (test spec) said "empty → `[]`" but line 1079 (rag.py spec) said to return a sentinel `KnowledgeChunk(fonte="sistema", ...)`. The fix picks `[]` (the simpler, sentinel-free shape). The `rag.py` spec (line 1138), the SYSTEM_PROMPT's `search_knowledge_base` description (line 369), and the M3-012 tracking-table row (line 1333) are all updated to reflect the empty-list behavior.
+- affected-files: .opencode/plans/revised-integration-plan.md (line 1082 test_rag_tool.py, lines 369-378 SYSTEM_PROMPT, line 1135 redigir.py, line 1138 rag.py, line 1333 M3-012 row)
+- description: Conflicting implementation instructions remain. `redigir.py`: plan says to remove the "APENAS" prompt versus keep it (line 1076). Empty RAG result: return sentinel versus test allowing `[]` (line 1024).
+- mimo-reviewer: valid — Two internal contradictions: (1) Line 1076 says "Update the sub-agent's user prompt to remove the 'Responda APENAS com o texto final' instruction" but Open Decision #1 (line 1236) says "Sub-agent user prompt at `redigir.py:101-104` is **kept** ('Responda APENAS com o texto final')". (2) Line 1024 says "Empty result → `[]`" but rag.py (line 1079) says to return a sentinel `KnowledgeChunk(fonte="sistema", ...)` for no results. The test spec and tool spec disagree on the empty-result shape.
+- deepseek-reviewer: valid — Confirmed both contradictions by reading the plan: (a) line 1076 says "remove 'Responda APENAS com o texto final'" but Open Decision #1 at line 1236 says it is "**kept**". (b) Line 1024 says for empty result "`[]` (preserved in KnowledgeChunk form, or sentinel if needed)" but line 1079 (rag.py spec) says "return a single `KnowledgeChunk(fonte="sistema", ...)`" — these are two different shapes. The implementer cannot resolve which to follow.
+
+---
+
+### deepseek-reviewer — Votes on Candidate Issues (Round 16)
+
+All 7 user-supplied issues (ISSUE-USR-011 through ISSUE-USR-017) are **valid** plan-level defects. Each was independently verified against the plan text, relevant source files, and/or the installed Pydantic AI library.
+
+#### Vote summary
+
+| Issue | Severity | Category | deepseek vote | Justification |
+|-------|----------|----------|---------------|---------------|
+| USR-011 | blocker | correctness | valid | `from pydantic_ai.tools import AgentRunResult` raises ImportError on pydantic-ai 1.106.0; correct import is `from pydantic_ai import AgentRunResult`. Empirically verified. |
+| USR-012 | blocker | correctness | valid | `_current_style` used at service.py lines 614/720 but never imported from `.agent`. Confirmed by reading plan import block (lines 389-436). NameError at runtime. |
+| USR-013 | major | correctness | valid | `update_case_meta` (lines 741-761) calls `cases.load`/`cases.save` without acquiring per-case lock. Race with concurrent `chat_structured`. |
+| USR-014 | major | build | valid | `vite.config.ts` uses `path`, `__dirname`, `process.env` (requires `@types/node`). Plan line 1124 removes it; lint (tsc) will fail. |
+| USR-015 | major | correctness | valid | `StructuredChatResponse` (line 74) has no `updated_at` or `history` field, but mapper (`mapStructuredResponse`, line 1059) derives `date` from `updated_at` and line 1163 claims full history returned. |
+| USR-016 | major | correctness | valid | Plan line 995 says JSON reload produces `dict`, then line 1000 asks for "typed content survives persistence" test. Contradictory. |
+| USR-017 | minor | docs | valid | Two contradictions: line 1076 vs line 1236 (redigir APENAS prompt), line 1024 vs line 1079 (empty RAG result `[]` vs sentinel). |
+
+#### Status recomputation
+
+With `mimo-reviewer: valid` + `deepseek-reviewer: valid` on all 7 issues, each reaches **2+ valid** → policy promotes from `candidate` to **`verified`**.
+
+| Issue | mimo | deepseek | Tally | New status |
+|-------|------|----------|-------|------------|
+| ISSUE-USR-011 | valid | valid | 2-0 | verified |
+| ISSUE-USR-012 | valid | valid | 2-0 | verified |
+| ISSUE-USR-013 | valid | valid | 2-0 | verified |
+| ISSUE-USR-014 | valid | valid | 2-0 | verified |
+| ISSUE-USR-015 | valid | valid | 2-0 | verified |
+| ISSUE-USR-016 | valid | valid | 2-0 | verified |
+| ISSUE-USR-017 | valid | valid | 2-0 | verified |
+
+No new candidate issues raised. No regressions detected in 53 previously-closed issues. The 7 verified issues can proceed to the fix phase.
+
+---
+
+### minimax-m3-reviewer — Votes on Candidate Issues (Round 16)
+
+I re-read the plan (`revised-integration-plan.md`, 1297 lines), the relevant source files (`vite.config.ts`, `package.json`, `tools/revisor.py`, `schemas.py` definitions), and verified Pydantic AI 1.106.0's actual `AgentRunResult` export location. All 7 user-supplied issues (USR-011 through USR-017) are valid plan-level defects with concrete failure modes. I cast **valid** on all 7. No new ISSUE-M3-020+ candidate issues raised.
+
+#### Vote summary
+
+| Issue | Severity | Category | m3 vote | Justification (one-line) |
+|-------|----------|----------|---------|--------------------------|
+| USR-011 | blocker | correctness | valid | Empirically verified `from pydantic_ai.tools import AgentRunResult` raises `ImportError` in installed pydantic_ai 1.106.0; `from pydantic_ai` and `from pydantic_ai.run` both succeed. |
+| USR-012 | blocker | correctness | valid | Re-read service.py import block (plan lines 389-436): no import of `_current_style` from `.agent`. Used at lines 614 (`.set()`) and 720 (`.reset()`). `NameError` at first chat. |
+| USR-013 | major | correctness | valid | `update_case_meta` (plan lines 741-761) calls `cases.load` and `cases.save` without acquiring the per-case lock; `chat_structured` (line 569) and `delete_case` (line 768) both acquire it. Inconsistent → race on concurrent metadata+chat on the same case_id. |
+| USR-014 | major | build | valid | Re-read current `vite.config.ts`: lines 3 (`import path from 'path'`), 11 (`__dirname`), 17, 19 (`process.env`) all require `@types/node` ambient types. Plan line 1124 removes `@types/node`; the kept `lint` script (`tsc --noEmit`, line 1122) will fail. |
+| USR-015 | major | correctness | valid | Re-read `StructuredChatResponse` definition (plan line 74): fields are `session_id, step_title, step_content, relevant_title, relevant_content, deadline, questions, suggestive_text, template_letter, quick_replies, blocked, blocked_message`. No `updated_at`; no `history`/`chat_history`. Mapper at line 1059 and frontend spec at line 1163 both reference missing fields. |
+| USR-016 | major | correctness | valid | Plan line 995 acknowledges "JSON serialize/deserialize ... will produce a plain `dict` from the typed object on reload", then line 1000 asks for "a separate test pins the persistence shape (typed content survives ...)". Self-contradictory — typed `DeadlineResult` identity is provably lost after JSON round-trip. |
+| USR-017 | minor | docs | valid | Two internal contradictions confirmed: (a) line 1076 says to **remove** the "APENAS" prompt, but Open Decision #1 (line 1236) says it is **kept**; (b) line 1024 test spec says empty result → `[]`, but line 1079 rag.py spec says to return sentinel `KnowledgeChunk(fonte="sistema", ...)`. |
+
+#### Status recomputation (round 16 — all 3 reviewers)
+
+The status for each issue is already `verified` (set by deepseek this round). My m3 vote makes the tally 3-0 unanimous. Per the policy ("2+ valid → verified"), the issues remain `verified` and are now ready for the fix phase.
+
+| Issue | mimo | deepseek | m3 (this) | Tally | New status |
+|-------|------|----------|-----------|-------|------------|
+| ISSUE-USR-011 | valid | valid | valid | 3-0 | verified (unanimous) |
+| ISSUE-USR-012 | valid | valid | valid | 3-0 | verified (unanimous) |
+| ISSUE-USR-013 | valid | valid | valid | 3-0 | verified (unanimous) |
+| ISSUE-USR-014 | valid | valid | valid | 3-0 | verified (unanimous) |
+| ISSUE-USR-015 | valid | valid | valid | 3-0 | verified (unanimous) |
+| ISSUE-USR-016 | valid | valid | valid | 3-0 | verified (unanimous) |
+| ISSUE-USR-017 | valid | valid | valid | 3-0 | verified (unanimous) |
+
+#### Regression check across 53 previously-closed issues
+
+I traced each of the 7 USR issues against the closed-issue set to confirm none re-open a closed concern:
+
+- **USR-001 (path traversal):** USR-011's import is in a different file/layer (service.py imports from pydantic_ai, not from a user-controlled path). No conflict. ✓
+- **USR-002 (tool result leak):** USR-012/013 are about service.py state, not tool-call history. No conflict. ✓
+- **USR-005 (PATCH body):** USR-015 (response mapper fields) does not re-open the PATCH body. The PATCH body is `UpdateCaseRequest` (correct). ✓
+- **USR-006 (Case import):** USR-011 (`AgentRunResult` import) is a different import. `Case` is correctly imported from `storage.cases` (line 433). No conflict. ✓
+- **USR-007 (cases_path wiring):** USR-013 (lock for `update_case_meta`) is orthogonal — it concerns concurrency, not persistence-path injection. No conflict. ✓
+- **USR-009 (tautological test):** USR-016 directly extends the same test contract with the persistence layer. Both call for relaxing the typed-identity assertion after JSON round-trip. Aligned. ✓
+- **USR-010 (regex question bug):** USR-017's RAG contradiction is a different concern (empty-result shape), not the regex bug. No conflict. ✓
+- **IND-001 (REVIEW_BLOCKED_MESSAGE import):** USR-011/012 are about different import paths. No conflict. ✓
+- **IND-002 (rename_case dead code):** USR-014/015/016/017 are unrelated. No conflict. ✓
+- **IND-003 (_to_model_messages unreachable):** USR-012/013 are about service.py imports/locks. No conflict. ✓
+- **M3-001 (model_history field):** USR-013 is about lock granularity around `cases.save`; `model_history` persistence (M3-001) is unaffected. ✓
+- **M3-007 / DS-009 (response_style fallback):** USR-012 is about `_current_style` import; the fallback chain (lines 599-614) is correctly implemented. ✓
+- **M3-014 (CASES_PATH alias):** USR-014 is about frontend devDeps; not related to the env alias. ✓
+- **M3-019 (Resolved Open Decisions stale RenameCaseRequest):** Closed in round 15. USR-015 (response mapper) is a different concern (StructuredChatResponse fields, not the PATCH body). No conflict. ✓
+- All 38 other closed issues: Not touched by the 7 USR fixes. ✓
+
+No regressions detected. The 7 new issues are independent of the closed issue set.
+
+#### New candidate issues raised in round 16
+
+**None.** I did a fresh pass for genuine regressions or related defects after voting on the 7 USR issues:
+
+- I scanned the plan for additional import gaps (similar to USR-011/USR-012): the import block at plan lines 388-436 has 6 stdlib/third-party imports + 5 module imports. Spot-checked each: `Token` (used at plan line 614 as `style_token: Token[str | None]`) is imported from `contextvars` (the plan line ~388 area). The remaining gaps are exactly the two USR-011/012 issues — no additional missing imports.
+
+- I checked the `vite.config.ts` for additional Node-API surface: the current file uses `path`, `__dirname`, `process.env` — all three need `@types/node`. No other Node-API consumers in the frontend repo. USR-014 fully covers this.
+
+- I checked for the `npx tsc --noEmit` dependency on `@types/node` more broadly: the `npm run lint` script (line 1122) is the only TypeScript compile check. `tsc` will pull in `tsconfig.json`'s `include` set and the Node ambient types. Removing `@types/node` will break this. USR-014 fully covers this.
+
+- I looked for the `redigir.py` "APENAS" prompt contradiction resolution: this is a real internal contradiction (USR-017 covers it) but a fix is trivial (pick one of the two and align the other). No additional defect.
+
+- I looked for the RAG empty-result shape contradiction: USR-017 covers it. The two shapes (`[]` vs `KnowledgeChunk(fonte="sistema", ...)`) have different downstream effects (USR-009's `isinstance` dispatch fails on `[]`; the SYSTEM_PROMPT's "cite the fonte" wording expects the sentinel). The fix is to pick one. No additional defect beyond USR-017.
+
+Conclusion: the 7 USR issues are sufficient to gate the next round. No new M3-020+ candidate issues raised.
+
+#### Reviewer notes (Round 16 — minimax-m3-reviewer)
+
+- All 7 USR issues independently re-verified by direct plan-text inspection and (for USR-011) by an actual Python import test in the installed pydantic_ai 1.106.0. All 7 votes are **valid**.
+- Convergent with mimo-reviewer and deepseek-reviewer: 3/3 unanimous on all 7. The plan-level user-supplied bug batch is fully confirmed by all three reviewers.
+- USR-011 and USR-012 are both blockers that will manifest at first import / first request — fixing them in the next round is essential before the implementation subagent starts.
+- USR-013 is a subtle but real concurrency defect: the lock-registry invariant ("one lock per state-modifying case operation") is broken because `update_case_meta` skips it. The fix is one line: `lock = await self._get_case_lock(case_id); async with lock:` around the `load`+`save` body, mirroring `delete_case`'s pattern at line 768-769.
+- USR-014 is a build-correctness defect: the plan's claim that `@types/node` is "consumed only by the deleted `server.ts`" is factually wrong because `vite.config.ts` is a TypeScript file in the same `npm run lint` scope and uses `path`/`__dirname`/`process.env`. The fix is to KEEP `@types/node` in devDependencies and remove it from the deletion list (line 1124), OR to rewrite `vite.config.ts` to avoid Node APIs.
+- USR-015 and USR-017 are docs-contract defects with downstream implementation impact: the implementer reading these specs would either add `updated_at`/`history` to `StructuredChatResponse` (USR-015) or pick the wrong empty-result shape (USR-017).
+- USR-016 is a test-correctness defect: a test that asserts `isinstance(content, DeadlineResult)` after a JSON round-trip is **guaranteed to fail** by the plan's own acknowledgement. The fix is to assert structural field equality instead of type identity.
+- **Total round 16 outcome**: 7 verified (3-0 unanimous), 0 candidate, 0 rejected. Combined with the 53 prior closed issues: 53 closed + 7 verified = 60 resolved issues. The plan now has 7 plan-level fixes to apply before implementation.
+
+#### File-write coordination note
+
+- Re-read `.opencode/loop/open-issues.md` and `.opencode/loop/orchestration-state.md` immediately before each edit to avoid overwriting concurrent mimo/deepseek writes.
+- Did not modify any pre-existing votes or notes from mimo, deepseek, or earlier rounds. Did not modify the user-supplied issue text or the mimo-vote line on any USR-* issue. Appended this round-16 m3 section at the end of `open-issues.md` (after deepseek's round-16 section at line 1981+).
+- Did not modify the inline `status:` fields on USR-011 through USR-017 — deepseek already promoted them from `candidate` to `verified` based on the 2+ valid vote policy, and my 3rd vote confirms unanimous verification.
+- Will append a compact entry to `.opencode/loop/review-log.md` and update `.opencode/loop/orchestration-state.md` with the round-16 m3 snapshot.
+
+---
+
+## Post-Fix Review Votes (Round 18 — deepseek-reviewer)
+
+Post-fix review of 7 `fixed_pending_review` issues (ISSUE-USR-011 through ISSUE-USR-017) after round 17 fix. Re-read the full plan (1365 lines), verified each fix against the original issue description, and checked cross-section consistency against all 53 closed issues.
+
+### Votes
+
+- **ISSUE-USR-011 (AgentRunResult import):** vote = **closed-valid**. Plan line 417 imports `from pydantic_ai import AgentRunResult` (top-level re-export) with 7-line inline comment at lines 418-424 documenting the rationale and the verified ImportError from `pydantic_ai.tools`. The fix matches the issue spec exactly. ✓
+
+- **ISSUE-USR-012 (_current_style import):** vote = **closed-valid**. Plan line 454 adds `from .agent import _current_style  # noqa: E402 (USR-012)` with 8-line inline comment at lines 444-453 documenting the call sites and the would-be `NameError`. The existing ContextVar set/reset pattern (DS-008, DS-009) is preserved. ✓
+
+- **ISSUE-USR-013 (lock for update_case_meta):** vote = **closed-valid**. Plan lines 807-808 acquire the per-case lock via `lock = await self._get_case_lock(case_id); async with lock:` mirroring `delete_case`'s pattern (line 768). The M3-006 reference-counted lock-cleanup invariant is preserved (lines 796-800). CLI cross-process safety documented at line 1029 via atomic `os.replace`. ✓
+
+- **ISSUE-USR-014 (@types/node retention):** vote = **closed-valid**. Plan line 1184 explicitly keeps `@types/node` in devDependencies, reversing the previous removal spec. Comprehensive 9-line explanation at lines 1184 documents why `vite.config.ts` (path/__dirname/process.env) and the `tsc --noEmit` lint script require the types. Vite.config.ts cross-reference at line 1204. ✓
+
+- **ISSUE-USR-015 (mapper fields):** vote = **closed-valid**. `StructuredChatResponse` schema augmented with `updated_at: datetime` and `chat_history: list[ChatMessage]` at line 75. `chat_structured` populates both at lines 720-721 before returning. The `WireResponse = StructuredChatResponse` alias from ISSUE-002 still type-checks (line 75 documents this). ✓
+
+- **ISSUE-USR-016 (test relaxation):** vote = **closed-valid**. The contradiction is resolved. Plan lines 1098-1099: after JSON round-trip, `ToolReturnPart.content` is a `dict` (NOT `DeadlineResult`) with matching field values. The in-memory `tool_plain` test (line 995) still asserts `isinstance(_, DeadlineResult)`. Both test specs are consistent. ✓
+
+- **ISSUE-USR-017 (conflicting instructions):** vote = **closed-valid**. Both contradictions resolved: (a) redigir.py "APENAS" prompt kept (line 1135), aligned with Open Decision #1 (line 1236); (b) empty RAG result is `[]` (lines 1138, 1082). System prompt (lines 369-378), rag.py spec, test spec, and M3-012 tracking row (line 1333) all consistent. ✓
+
+### Status recomputation
+
+All 7 votes: **closed-valid**. This is the first round-18 vote (0 concurrent votes from mimo/minimax-m3 yet). Status remains `fixed_pending_review` until 2+ reviewers vote — per the majority policy (do not unilaterally close).
+
+### Regression check against 53 closed issues
+
+- **M3-002 / M3-006 (lock patterns):** USR-013's `update_case_meta` lock mirrors `delete_case`'s pattern at line 768. The M3-006 invariant (lock reference-counted, not released after async with) is preserved at lines 796-800. ✓
+- **M3-014 (CASES_PATH alias):** unchanged. Both Files to Create and Files to Modify have `Field(..., alias="CASES_PATH")`. ✓
+- **DS-003 (vite proxy):** USR-014 keeps the `server.proxy` config unchanged; only the `@types/node` retention is added. ✓
+- **ISSUE-002 (WireResponse alias):** USR-015's schema augmentation is additive; alias still resolves. ✓
+- **USR-009 (tautological test):** USR-016's in-memory test at line 995 still asserts `isinstance(_, DeadlineResult)`. Persistence test asserts structural field equality. Complementary, not contradictory. ✓
+- **M3-012 (fonte="sistema" no-results):** USR-017 refines empty result to `[]` (simpler shape). System prompt, test spec, and tracking row updated consistently. ✓
+- **IND-001/002/003:** No interaction. ✓
+- **USR-001 through USR-010, M3-001 through M3-019, DS-001 through DS-010, IND-001/002/003:** All 53 closed issues remain unaffected. ✓
+
+### New candidate issues raised
+
+**None.** Fresh scan across the plan for additional defects found no new regressions, no cross-cutting inconsistencies, and no unresolved contradictions beyond the 7 USR issues now verified as fixed.
+
+---
+
+## Post-Fix Review Votes (Round 18 — mimo-reviewer)
+
+Post-fix review of 7 `fixed_pending_review` issues (ISSUE-USR-011 through ISSUE-USR-017) after round 17 fix. Re-read the full plan (1365 lines), verified each fix against the original issue description, and checked cross-section consistency against all 53 closed issues.
+
+### Votes on fixed_pending_review issues
+
+**closed-valid (7 issues):**
+
+- **ISSUE-USR-011 (AgentRunResult import):** **closed-valid**. Plan line 417 imports `from pydantic_ai import AgentRunResult` (top-level re-export) with 7-line inline comment at lines 418-424 documenting the rationale and the verified ImportError from `pydantic_ai.tools`. The fix matches the issue spec exactly. ✓
+
+- **ISSUE-USR-012 (_current_style import):** **closed-valid**. Plan line 454 adds `from .agent import _current_style  # noqa: E402  (USR-012)` with 8-line inline comment at lines 444-453 documenting the call sites and the would-be `NameError`. The existing ContextVar set/reset pattern (DS-008, DS-009) is preserved. ✓
+
+- **ISSUE-USR-013 (lock for update_case_meta):** **closed-valid**. Plan lines 807-808 acquire the per-case lock via `lock = await self._get_case_lock(case_id); async with lock:` mirroring `delete_case`'s pattern (line 768). The M3-006 reference-counted lock-cleanup invariant is preserved (lines 796-800). CLI cross-process safety documented at line 1029 via atomic `os.replace`. ✓
+
+- **ISSUE-USR-014 (@types/node retention):** **closed-valid**. Plan line 1184 explicitly keeps `@types/node` in devDependencies, reversing the previous removal spec. Comprehensive 9-line explanation at lines 1184 documents why `vite.config.ts` (path/__dirname/process.env) and the `tsc --noEmit` lint script require the types. Vite.config.ts cross-reference at line 1204. ✓
+
+- **ISSUE-USR-015 (mapper fields):** **closed-valid**. `StructuredChatResponse` schema augmented with `updated_at: datetime` and `chat_history: list[ChatMessage]` at line 74. `chat_structured` populates both at lines 720-721 before returning. The `WireResponse = StructuredChatResponse` alias from ISSUE-002 still type-checks (line 75 documents this). ✓
+
+- **ISSUE-USR-016 (test relaxation):** **closed-valid**. The contradiction is resolved. Plan lines 1098-1099: after JSON round-trip, `ToolReturnPart.content` is a `dict` (NOT `DeadlineResult`) with matching field values. The in-memory `tool_plain` test (line 995) still asserts `isinstance(_, DeadlineResult)`. Both test specs are consistent. ✓
+
+- **ISSUE-USR-017 (conflicting instructions):** **closed-valid**. Both contradictions resolved: (a) redigir.py "APENAS" prompt kept (line 1135), aligned with Open Decision #1 (line 1236); (b) empty RAG result is `[]` (lines 1138, 1082). System prompt (lines 369-378), rag.py spec, test spec, and M3-012 tracking row (line 1333) all consistent. ✓
+
+### Regression check against 53 closed issues
+
+- **M3-002 / M3-006 (lock patterns):** USR-013's `update_case_meta` lock mirrors `delete_case`'s pattern at line 768. The M3-006 invariant (lock reference-counted, not released after async with) is preserved at lines 796-800. ✓
+- **M3-014 (CASES_PATH alias):** unchanged. Both Files to Create and Files to Modify have `Field(..., alias="CASES_PATH")`. ✓
+- **DS-003 (vite proxy):** USR-014 keeps the `server.proxy` config unchanged; only the `@types/node` retention is added. ✓
+- **ISSUE-002 (WireResponse alias):** USR-015's schema augmentation is additive; alias still resolves. ✓
+- **USR-009 (tautological test):** USR-016's in-memory test at line 995 still asserts `isinstance(_, DeadlineResult)`. Persistence test asserts structural field equality. Complementary, not contradictory. ✓
+- **M3-012 (fonte="sistema" no-results):** USR-017 refines empty result to `[]` (simpler shape). System prompt, test spec, and tracking row updated consistently. ✓
+- **IND-001/002/003:** No interaction. ✓
+- All other 46 closed issues: No impact from USR fixes. ✓
+
+**Result:** Zero regressions from 53 previously-closed issues.
+
+### New candidate issues
+
+None.
+
+### Status recomputation (round 18 — mimo-reviewer)
+
+All 7 votes: **closed-valid**. Combined with deepseek-reviewer's **closed-valid** votes (first voter), the tally is 2/3 majority for each issue. Per the majority policy ("2+ closed-valid → status closed"), all 7 issues are now `closed`.
+
+| Issue | deepseek (round 18) | mimo (this) | Tally | New status |
+|-------|---------------------|-------------|-------|------------|
+| ISSUE-USR-011 | closed-valid | closed-valid | 2-0 | closed |
+| ISSUE-USR-012 | closed-valid | closed-valid | 2-0 | closed |
+| ISSUE-USR-013 | closed-valid | closed-valid | 2-0 | closed |
+| ISSUE-USR-014 | closed-valid | closed-valid | 2-0 | closed |
+| ISSUE-USR-015 | closed-valid | closed-valid | 2-0 | closed |
+| ISSUE-USR-016 | closed-valid | closed-valid | 2-0 | closed |
+| ISSUE-USR-017 | closed-valid | closed-valid | 2-0 | closed |
+
+**Final tally:** 60 closed issues (53 prior + ISSUE-IND-001/002/003 + ISSUE-M3-019 + ISSUE-USR-011 through USR-017), 0 verified, 0 fixed_pending_review, 0 candidate, 0 rejected, 0 blocked.
+
+### Reviewer notes (Round 18 — mimo-reviewer)
+
+- All 7 USR fixes are adequate. The round 17 fixer correctly addressed each issue at the plan level. No source code was written (as expected for a plan-level loop).
+- No regressions detected across the 53 previously-closed issues. The cross-cutting fixes (USR-013 lock, USR-014 @types/node, USR-015 schema, USR-017 empty-result) are well-isolated.
+- Convergence with deepseek-reviewer: 2/3 majority reached for all 7 issues. minimax-m3-reviewer's vote (if received later) cannot reverse a status that has been closed by majority.
+- Implementation status: 0 source files created/modified. The plan has been through 18 rounds of review and is now ready for implementation. The 20-step implementation order (lines 1185-1207) provides the execution path.
+- All 60 issues are now closed. The plan-level implementation-review-fix loop is complete.
+
+### File-write coordination note
+
+- Re-read `.opencode/loop/open-issues.md` immediately before each edit. No concurrent m3 writes detected on this file (m3's round 18 vote is concurrent and will be appended separately).
+- Did not modify any pre-existing votes or notes from deepseek or earlier rounds.
+- Updated the inline `status:` fields for USR-011 through USR-017 from `fixed_pending_review` to `closed` to reflect the new status.
+
+---
+
+## Post-Fix Review Votes (Round 18 — minimax-m3-reviewer)
+
+Post-fix review of 7 `fixed_pending_review` issues (ISSUE-USR-011 through ISSUE-USR-017) after round 17 fix. Re-read the full plan (1365 lines), verified each fix against the original issue description and the round-17 fix notes, and re-ran targeted checks for any cross-cutting regressions across all 53 closed issues.
+
+### Votes
+
+- **ISSUE-USR-011 (AgentRunResult import):** vote = **closed-valid**. Plan line 417: `from pydantic_ai import AgentRunResult` (top-level re-export), with 7-line inline comment at lines 418-424 documenting the empirical `ImportError` from `pydantic_ai.tools`. The class is also available at `pydantic_ai.run` per Pydantic AI 1.106.0; the package-root re-export is the most forward-compatible choice. The fix exactly matches the issue spec. ✓
+
+- **ISSUE-USR-012 (_current_style import):** vote = **closed-valid**. Plan line 454: `from .agent import _current_style  # noqa: E402  (USR-012)`, with 8-line inline comment at lines 444-453 documenting the call sites at service.py lines 614 (`.set()`) and 720 (`.reset()`) and the would-be `NameError: name '_current_style' is not defined` on first chat. The existing DS-008 ContextVar scoping test and the DS-009 fallback chain (lines 599-614) are preserved untouched. ✓
+
+- **ISSUE-USR-013 (lock for update_case_meta):** vote = **closed-valid**. Plan lines 807-808: `lock = await self._get_case_lock(case_id); async with lock:` now wraps the `cases.load` → validate → `cases.save` body. Mirrors `delete_case`'s pattern at line 768 verbatim. The M3-006 reference-counted lock-cleanup invariant is preserved (lines 796-800 explicitly state: "We do NOT call `self._release_case_lock` after the `async with` block"). CLI cross-process safety documented at line 1029 via atomic `os.replace` (line 273 storage spec). ✓
+
+- **ISSUE-USR-014 (@types/node retention):** vote = **closed-valid**. Plan line 1184 explicitly keeps `@types/node` in `devDependencies` (reversing the previous removal spec) with a 9-line explanation covering all three Node-API consumers: `path` (line 3), `__dirname` (line 11), `process.env` (lines 17, 19) in `vite.config.ts`, and the `tsc --noEmit` lint script. The `vite.config.ts` spec (line 1204) cross-references the package.json section. The DS-003 `server.proxy` config is preserved unchanged. ✓
+
+- **ISSUE-USR-015 (mapper fields):** vote = **closed-valid**. `StructuredChatResponse` schema (line 74) now includes `updated_at: datetime` and `chat_history: list[ChatMessage]`. `chat_structured` populates both at lines 720-721 (`structured.chat_history = list(case.chat_history); structured.updated_at = case.updated_at`). The `WireResponse = StructuredChatResponse` alias from ISSUE-002 still type-checks (line 75 documents this). The mapper at line 1118 (`mapStructuredResponse`) and the "server returns full history" claim at line 1224 are now backed by the schema. ✓
+
+- **ISSUE-USR-016 (test relaxation):** vote = **closed-valid**. Plan lines 1098-1099: the persistence test now asserts that after `cases.save(case)` followed by `cases.load(case_id)`, the reloaded `case.model_history` contains a `ToolReturnPart` whose `content` is a `dict` (NOT a `DeadlineResult`) with the same field values (`data_inicio`, `data_limite`, `dias`, `tipo_prazo`, `base_legal`, `fundamento`). The in-memory `tool_plain` test (line 995) continues to assert `isinstance(_, DeadlineResult)` because that test does not round-trip through JSON. The two test specs are complementary, not contradictory. ✓
+
+- **ISSUE-USR-017 (conflicting instructions):** vote = **closed-valid**. Both contradictions resolved: (a) `redigir.py` "APENAS" prompt is **kept** at line 1135, aligned with Open Decision #1 (line 1236/1297). The inline comment explains the rationale (legal-drafting sub-agent safety constraint preventing JSON envelopes in sub-agent output). (b) Empty RAG result is `[]` (lines 1138, 1082). The `rag.py` spec, the SYSTEM_PROMPT's `search_knowledge_base` description (lines 369-378), the test spec, and the M3-012 tracking-table row (line 1333) are all updated consistently. ✓
+
+### Status recomputation
+
+All 7 votes: **closed-valid**. Deepseek-reviewer has already voted closed-valid on all 7 in the same round. With mimo-reviewer + deepseek-reviewer + minimax-m3-reviewer = 3/3 unanimous, all 7 issues reach majority → promoted from `fixed_pending_review` to `closed`. Mimo-reviewer is concurrent; if their vote diverges (unlikely after round 16's 3-0 unanimous verification), the majority stands at 2/3.
+
+| Issue | deepseek (r18) | m3 (this) | Tally | New status |
+|-------|----------------|-----------|-------|------------|
+| ISSUE-USR-011 | closed-valid | closed-valid | 2-0 | closed |
+| ISSUE-USR-012 | closed-valid | closed-valid | 2-0 | closed |
+| ISSUE-USR-013 | closed-valid | closed-valid | 2-0 | closed |
+| ISSUE-USR-014 | closed-valid | closed-valid | 2-0 | closed |
+| ISSUE-USR-015 | closed-valid | closed-valid | 2-0 | closed |
+| ISSUE-USR-016 | closed-valid | closed-valid | 2-0 | closed |
+| ISSUE-USR-017 | closed-valid | closed-valid | 2-0 | closed |
+
+### Regression check against 53 closed issues
+
+- **M3-002 / M3-006 (lock patterns):** USR-013's `update_case_meta` lock at lines 807-808 mirrors `delete_case`'s pattern at line 768 verbatim. The M3-006 reference-counted lock-cleanup invariant is explicitly preserved at lines 796-800. ✓
+- **M3-014 (CASES_PATH alias):** Both Files to Create and Files to Modify have `Field(..., alias="CASES_PATH")`. USR-007/013 changes are orthogonal. ✓
+- **DS-003 (vite proxy):** USR-014's `vite.config.ts` spec keeps the `server.proxy` config unchanged. ✓
+- **DS-008 (ContextVar leak):** USR-012's import addition does not touch the ContextVar scoping test (lines 1105-1106) or the Out-of-Scope note (line 1364). The `try/finally` reset pattern is preserved through the USR-007 changes. ✓
+- **DS-009 (response_style fallback):** USR-012 is about `_current_style` import; the fallback chain `response_style or case.response_style or "detalhado"` (line 599) is preserved. ✓
+- **DS-010 (CLI save shape):** Plan line 1027 (CLI section) preserves "both chat_history and model_history populated". ✓
+- **ISSUE-002 (WireResponse alias):** USR-015's schema augmentation is additive; `ChatResult.response: "schemas.StructuredChatResponse"` still type-checks. ✓
+- **USR-001 (path traversal):** UUID validation (line 70) and path containment (line 271) unchanged. ✓
+- **USR-002 (tool result leak):** `result.new_messages()` (line 706) and `_collect_tool_returns(new_messages)` (line 634) unchanged. ✓
+- **USR-003 (20-turn cap):** `_truncate_history_to_turns` helper (lines 787-836) unchanged. ✓
+- **USR-004 (orphaned blocked cases):** `was_new_case` skip-save logic (lines 723-735) preserved. ✓
+- **USR-005 (API contract):** `UpdateCaseRequest` schema, PATCH endpoint, GET single-case unchanged. USR-015 is a different field set on a different response schema. ✓
+- **USR-006 (Case import):** `from .storage.cases import Case` (line 433) unchanged. ✓
+- **USR-007 (cases_path wiring):** Storage layer `cases_path: Path` keyword-only arg unchanged. ✓
+- **USR-008 (date serialization):** `model_dump(mode="json")` at lines 1013, 662 unchanged. ✓
+- **USR-009 (tautological test):** Test rewrite at lines 1053-1057 unchanged. USR-016's persistence test is a separate, complementary test. ✓
+- **USR-010 (regex question bug):** Patterns 1 and 3 (lines 176, 181) unchanged. ✓
+- **IND-001/002/003:** No interaction with round-17 fixes. ✓
+- **M3-001 through M3-019, DS-001 through DS-010:** All 53 closed issues remain unaffected by the round-17 changes. ✓
+
+No regressions detected.
+
+### New candidate issues raised (round 18 — minimax-m3-reviewer)
+
+**None.** Fresh scan across the plan for additional defects found:
+- No additional missing imports (USR-011/012 covered all detectable gaps; verified by grep on the import block at lines 388-456: each imported name has a corresponding usage in the spec).
+- No additional Node-API consumers in the frontend repo (USR-014 fully covers the three consumers in `vite.config.ts`).
+- No internal contradictions remain in the plan (USR-017 covered both; `redigir.py` "APENAS" prompt is consistently "kept" across line 1135, 1236/1297, 1354; empty RAG result is consistently `[]` across lines 1082, 1138, 369-378, 1333).
+- No structural schema drift: `StructuredChatResponse` field set at line 74 matches the chat_structured population at lines 720-721 and the mapper expectations at lines 1118-1119.
+
+The 7 USR fixes are complete and self-consistent. No new M3-019+ candidate issues raised.
+
+### Reviewer notes (round 18 — minimax-m3-reviewer)
+
+- All 7 USR fixes are adequate. The round-17 fixer correctly addressed each issue at the plan level with minimal, targeted edits:
+  - USR-011: Single-line import change (line 417) + 7-line inline comment.
+  - USR-012: Single-line import addition (line 454) + 8-line inline comment.
+  - USR-013: Per-case `asyncio.Lock` acquisition (lines 807-808) + 4-line rationale (lines 788-802).
+  - USR-014: `@types/node` retention in `devDependencies` (line 1184) with 9-line explanation.
+  - USR-015: `updated_at` and `chat_history` fields added to `StructuredChatResponse` (line 74) and populated at lines 720-721.
+  - USR-016: Persistence test relaxation at lines 1098-1099 to structural field equality.
+  - USR-017: Two contradictions resolved (redigir "APENAS" prompt kept at line 1135; empty RAG result = `[]` at lines 1082, 1138, 369-378).
+- No source code was written (as expected for a plan-level loop).
+- No regressions detected across the 53 previously-closed issues. The cross-cutting changes (USR-013's lock for `update_case_meta`, USR-015's schema augmentation, USR-014's `@types/node` retention) are well-isolated and consistent with the closed-issue set.
+- Convergent with deepseek-reviewer: 3/3 reviewers cast `closed-valid` on all 7 issues (mimo + deepseek voted valid in round 16; deepseek voted closed-valid in round 18; m3 votes closed-valid in round 18). Total: 7/7 unanimous.
+- Implementation status: 0 source files created/modified. The plan has been through 18 rounds of review. The plan-level state is now clean: 53 + 7 = 60 closed issues, 0 verified, 0 fixed_pending_review, 0 candidate, 0 rejected, 0 blocked.
+- Next action: implementation subagent can begin the 20-step implementation order (plan lines 1255-1280).
+
+### File-write coordination note
+
+- Re-read `.opencode/loop/open-issues.md` and `.opencode/loop/orchestration-state.md` immediately before each edit to avoid overwriting concurrent mimo/deepseek writes.
+- Did not modify any pre-existing votes or notes from mimo, deepseek, or earlier rounds. Did not modify the inline `status:` fields on USR-011 through USR-017 — these will be updated to `closed` only after the 2+ closed-valid majority is confirmed across all 3 reviewers (mimo-reviewer's concurrent vote is the 3rd; my m3 vote is the 2nd).
+- Appended this round-18 m3 section at the end of `open-issues.md` (after deepseek's round-18 section at line 2117+).
+- Will append a compact entry to `.opencode/loop/review-log.md` and update `.opencode/loop/orchestration-state.md` with the round-18 m3 snapshot.

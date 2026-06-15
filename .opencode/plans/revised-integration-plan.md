@@ -71,7 +71,8 @@ Wire types for the API. All fields snake_case.
   - `session_id` MUST be a `UUID`-typed field (Pydantic auto-validates and rejects malformed values with a 422). The server never accepts an arbitrary string for `session_id` (ISSUE-USR-001). The first-message auto-create case (`session_id=None`) generates a fresh `uuid.uuid4()` server-side.
   - `title` and `icon_name` are sent on the **first** message of a new case (when `session_id` is null). Server uses them to populate the case file. Subsequent messages ignore them.
   - `response_style` is per-request; the `_current_style` ContextVar overrides the persisted case default for the current turn only. The case default is set on first creation and read back on subsequent turns when the request does not include a `response_style` (ISSUE-M3-007 + ISSUE-DS-009).
-- `StructuredChatResponse { session_id, step_title, step_content, relevant_title, relevant_content, deadline, questions, suggestive_text, template_letter, quick_replies, blocked, blocked_message }`
+- `StructuredChatResponse { session_id, updated_at, chat_history, step_title, step_content, relevant_title, relevant_content, deadline, questions, suggestive_text, template_letter, quick_replies, blocked, blocked_message }`
+  - ISSUE-USR-015: `updated_at: datetime` and `chat_history: list[ChatMessage]` are added so the frontend mapper and the "server returns the full chat history" claim (line 1163 area) match the actual schema. The mapper (`mapStructuredResponse`, line 1059) derives `date` from `updated_at`; without the field, the mapper would have to call a separate `GET /api/cases/{id}` per response to compute the date, which would double the API surface area for what is a one-field lookup. The frontend `handleSelectCase` and `handleSendMessage` flows can now read `chat_history` directly from the chat response. The `chat_history` list mirrors the persisted `case.chat_history` at the time the response was built (i.e., includes the user and assistant messages just appended for this turn per line 661-681). `updated_at` is the server-side `case.updated_at` set at line 682. The `WireResponse` alias introduced in round 3 (ISSUE-002) is preserved: `WireResponse = StructuredChatResponse` and the `ChatResult.response: "schemas.StructuredChatResponse"` field still type-checks against the augmented schema.
 - `CaseSummary { id, title, created_at, updated_at, last_message, icon_name, response_style, tag_text?, is_demo }`
   - `last_message` is the last assistant message's `step_content` (or `text`), truncated to 80 chars.
   - `is_demo: bool` is true for the three seed cases. Frontend renders a "DEMO" badge for these.
@@ -367,14 +368,13 @@ adicione comentários antes ou depois do texto.
 
 ### `search_knowledge_base`
 Busca trechos relevantes na base de conhecimento do CDC. Retorna uma
-lista de objetos `{fonte, texto}`. Se a lista contiver um único item com
-`fonte="sistema"` e `texto="Nenhum trecho relevante foi encontrado na
-base de conhecimento."`, isso significa que **nada relevante foi
-encontrado** — NÃO cite `sistema` como fonte; apenas diga ao usuário
-que a base não tem cobertura suficiente para o caso dele e, se
-aplicável, recomende a consulta a um advogado. Se a lista contiver
-trechos reais (com `fonte` diferente de `"sistema"`), cite a `fonte`
-na sua resposta.
+lista de objetos `{fonte, texto}`. ISSUE-USR-017: se a lista retornada
+for **vazia `[]`**, isso significa que **nada relevante foi encontrado**
+— diga ao usuário que a base não tem cobertura suficiente para o caso
+dele e, se aplicável, recomende a consulta a um advogado. Se a lista
+contiver trechos reais (cada um com `fonte` sendo o nome do arquivo
+de origem, ex.: `CDC.pdf` ou `STJ.pdf`), cite a `fonte` na sua
+resposta. Não invente fontes; se a lista está vazia, não cite nada.
 
 ## Estilo
 - Frases curtas. Listas numeradas ou com marcadores quando ajudar.
@@ -414,7 +414,14 @@ from pydantic_ai.messages import (
     UserPromptPart,
     TextPart,
 )
-from pydantic_ai.tools import AgentRunResult
+from pydantic_ai import AgentRunResult
+# ISSUE-USR-011: `AgentRunResult` is re-exported from the top-level
+# `pydantic_ai` package (and also from `pydantic_ai.run`). The previous
+# import path `from pydantic_ai.tools import AgentRunResult` raises
+# `ImportError: cannot import name 'AgentRunResult' from 'pydantic_ai.tools'`
+# on pydantic_ai 1.106.0 (and on the 1.x line in general). The class
+# lives in `pydantic_ai.run`, but the public re-export is at the package
+# root, so we import from there to stay forward-compatible.
 
 from . import schemas
 from .contracts import DeadlineResult
@@ -434,6 +441,17 @@ from .storage.cases import Case
 from .storage import cases
 from .adapter import extract_structured_response
 from .tools.revisor import RevisionResult
+# ISSUE-USR-012: `_current_style` is the `ContextVar[str | None]` defined
+# in `agent.py` (see plan line 302) that carries the per-request
+# `response_style` override. The `@agent.instructions` callback reads
+# `_current_style.get()` to decide which `STYLE_PROMPTS` entry to inject
+# into the system prompt. `chat_structured` (lines 614 and 720 below)
+# calls `_current_style.set(effective_style)` and
+# `_current_style.reset(style_token)` on the local `Token`, but without
+# this import the service would hit `NameError: name '_current_style' is
+# not defined` on every `chat_structured` call. Import the symbol from
+# `.agent` (where it is defined) to wire the per-request override.
+from .agent import _current_style  # noqa: E402  (USR-012)
 
 logger = logging.getLogger(__name__)
 
@@ -687,6 +705,21 @@ class ChatService:
                 # turns' messages (ISSUE-USR-002).
                 case.model_history = case.model_history + new_messages
 
+                # ISSUE-USR-015: populate the new schema fields on the
+                # outgoing `StructuredChatResponse` so the frontend mapper
+                # (`mapStructuredResponse`, line 1059) and the "server
+                # returns the full chat history" claim (line 1163 area) have
+                # the data they reference. `chat_history` is a defensive
+                # shallow copy of the persisted history (the in-memory
+                # `case.chat_history` is the source of truth). `updated_at`
+                # is the timestamp we just set above; serializing via
+                # `model_dump(mode="json")` would be done by the API layer's
+                # Pydantic response model, so we leave the `datetime` here
+                # and trust the FastAPI encoder (see also ISSUE-USR-008 for
+                # the explicit `mode="json"` call site on the 422 path).
+                structured.chat_history = list(case.chat_history)
+                structured.updated_at = case.updated_at
+
                 # ISSUE-USR-004: do NOT persist a brand-new case that the
                 # reviewer blocked. The previous plan saved the case
                 # unconditionally, which orphaned `{case_id}.json` files on
@@ -751,13 +784,37 @@ class ChatService:
         patched in a single request. Per-field validation (e.g.,
         `response_style` must be one of the three literals; `title` must
         be non-empty; `icon_name` must be in the allowed set) lives here.
+
+        ISSUE-USR-013: this method MUST acquire the per-case lock before
+        loading and saving the case. Without the lock, a concurrent
+        `chat_structured` on the same `case_id` could read the case, then
+        this method could read-modify-save the same case, and one of the
+        two writes would clobber the other. The lock-registry invariant
+        (one lock per state-modifying case operation) is preserved by
+        mirroring `delete_case`'s pattern at line 768: acquire the lock,
+        do the load/validate/save, and release implicitly via the
+        `async with` exit. We do NOT call `self._release_case_lock`
+        after the `async with` block: the lock is reference-counted by
+        the active calls (per ISSUE-M3-006), and any in-flight
+        `chat_structured` on the same `case_id` keeps the lock alive
+        until it returns. A subsequent `delete_case` will pop the lock
+        after the file delete (per the M3-006 invariant).
         """
-        case = cases.load(case_id, cases_path=self._cases_path)
-        if case is None:
-            raise KeyError(case_id)
-        # ... validate fields, apply, save ...
-        case.updated_at = _now()
-        cases.save(case, cases_path=self._cases_path)
+        # ISSUE-USR-013: acquire the per-case lock to serialize metadata
+        # updates with concurrent `chat_structured` and `delete_case` on
+        # the same case_id. The same `asyncio.Lock` instance is reused
+        # for all state-modifying operations on this case.
+        lock = await self._get_case_lock(case_id)
+        async with lock:
+            case = cases.load(case_id, cases_path=self._cases_path)
+            if case is None:
+                raise KeyError(case_id)
+            # ... validate fields, apply, save ...
+            # Per-field validation (non-empty `title`, `response_style`
+            # in the allowed literal set, `icon_name` in the allowed
+            # union) is performed here before mutating `case`.
+            case.updated_at = _now()
+            cases.save(case, cases_path=self._cases_path)
         return case
 
     async def delete_case(self, case_id: str) -> bool:
@@ -969,6 +1026,7 @@ Stays on `agent.run_stream` (per Open Issue #1 = A). Writes case files via the s
 - After each turn, save the case file to `./storage/cases/{session_id}.json` — **the same path the API uses** (ISSUE-010) so CLI conversations are visible from the UI and vice versa.
 - The CLI constructs a `Case` object with both `chat_history` and `model_history` populated, then calls `cases.save(case, cases_path=settings.cases_path)` (ISSUE-DS-010 + ISSUE-USR-007). Saving only `chat_history` would leave `model_history == []` on disk, and a subsequent API turn on the same case would lose tool-call/return context (per ISSUE-M3-001). The persistence path is shared with the API, so the saved shape must match. The CLI reads `settings.cases_path` (env `CASES_PATH`) so the env var works for both transports.
 - Streaming UX preserved (the Live spinner / token-by-token rendering at `cli.py:124-156`).
+- **CLI write safety** (ISSUE-USR-013): the CLI writes to the same case files as the API. Because the CLI runs in a separate process, it cannot share the service's in-process `asyncio.Lock` registry — the API's per-case lock does not protect against a concurrent CLI write. To avoid a torn or partially-written JSON, the storage layer's `cases.save` MUST use an **atomic POSIX rename**: write the new JSON to `{case_id}.json.tmp` in the same directory, then call `os.replace(tmp, final)`. `os.replace` is atomic on POSIX (Linux/macOS) and on Windows when the destination is on the same filesystem (the cases directory is created once at startup, so all writes stay in the same directory). The API service is the primary user of the in-process lock for in-service concurrency; the CLI is a secondary writer that relies on the storage layer's atomic rename for cross-process safety. The `cases.save` spec at line 263 must include this atomic-rename contract.
 
 ### `src/advogado_de_bolso/config.py`
 Add `cases_path: Path = Field(default=Path("./storage/cases"), alias="CASES_PATH")` (ISSUE-M3-014). The env alias keeps `Settings` consistent with `DATA_PATH` / `CHROMA_PATH` / `HF_HOME` which all use `Field(..., alias=...)`.
@@ -997,7 +1055,7 @@ Golden tests covering:
   2. Call `await agent.run("user message that triggers the tool")` against a real (or `TestModel`) LLM.
   3. Inspect `result.new_messages()` and assert the last `ModelResponse.parts[-1]` is a `ToolCallPart` AND the immediately-following `ModelRequest.parts[-1]` is a `ToolReturnPart` whose `content` is an **`isinstance` of `DeadlineResult`** (NOT a `dict`).
   4. This pins the actual `tool_plain` → `ToolReturnPart` round-trip. If Pydantic AI changes and starts stringifying `tool_plain` returns, this test will fail loudly.
-  5. Note: even with the real round-trip, JSON serialize/deserialize (`all_messages_json` → `ModelMessagesTypeAdapter.validate_python`) will produce a plain `dict` from the typed object on reload — the test therefore only pins the **in-memory** behavior, not persistence. A separate test pins the persistence shape (typed content survives `case.model_history` round-trip through the storage layer).
+   5. Note: even with the real round-trip, JSON serialize/deserialize (`all_messages_json` → `ModelMessagesTypeAdapter.validate_python`) will produce a plain `dict` from the typed object on reload — the test therefore only pins the **in-memory** behavior, not persistence. A separate test pins the persistence shape (the `ModelMessage` structure with `ToolCallPart` + `ToolReturnPart` survives the storage layer round-trip, but the `ToolReturnPart.content` is loaded as a `dict`, NOT as a `DeadlineResult`).
 
 ### `tests/test_storage.py` (new)
 - Atomic write (write to `.tmp`, replace).
@@ -1021,7 +1079,7 @@ All string-content assertions become field assertions:
 - Mock the retriever to return nodes.
 - Assert `search_knowledge_base` returns `list[KnowledgeChunk]`.
 - Assert the first chunk's `fonte` is the node's `file_name`.
-- Empty result → `[]` (preserved in `KnowledgeChunk` form, or sentinel if needed).
+- Empty result → `[]` (ISSUE-USR-017: empty RAG result is the empty list `[]`, NOT a sentinel `KnowledgeChunk(fonte="sistema", ...)`). The test asserts `search_knowledge_base` returns an empty list, and the adapter handles the empty list via the `relevant_chunks` fallthrough (no `relevant_title`, no `relevant_content`). The system prompt acknowledges the empty result with the "no relevant info" message.
 
 ### `tests/test_api.py` (rewrite)
 - Drop tests for `/api/chat`, `/api/sessions/{id}`, `/assets/*`.
@@ -1037,6 +1095,7 @@ All string-content assertions become field assertions:
 - New tests: `chat_structured` with new session creates a case file; second message appends; per-case lock serializes concurrent calls; reviewer-blocked returns blocked; `delete_case` cleans up the lock.
 - Test the `ContextVar` reset: after `chat_structured(style="simples")`, the style is reset (no leakage between requests).
 - **`model_history` persistence** (ISSUE-M3-001): after a turn that included a `ToolCallPart`/`ToolReturnPart`, the case file on disk contains the full `ModelMessage` list with the tool parts. A subsequent `chat_structured` call passes that list back to the backend. Assert via inspecting `case.model_history` after the first call, then mock the second call to capture the `history` argument and assert it matches.
+- **`model_history` JSON-roundtrip shape** (ISSUE-USR-016): the persistence test for the tool return MUST NOT require `isinstance(content, DeadlineResult)` after a JSON load. The plan's `test_adapter.py` spec at line 995 acknowledges that JSON serialize/deserialize produces a plain `dict` from the typed object on reload. The relaxed assertion is: after `cases.save(case)` followed by `cases.load(case_id)`, the reloaded `case.model_history` contains a `ModelRequest` whose last part is a `ToolReturnPart` whose `content` is a `dict` (NOT a `DeadlineResult`) with the same field values as the original (`data_inicio`, `data_limite`, `dias`, `tipo_prazo`, `base_legal`, `fundamento`). This pins the persistence structure without making an impossible typed-identity claim. The in-memory `tool_plain` round-trip test (line 995) continues to assert `isinstance(content, DeadlineResult)` because that test does not round-trip through JSON.
 - **`update_case_meta` wiring** (ISSUE-M3-008): the PATCH endpoint calls `update_case_meta(case_id, title="...")`, and the case on disk reflects the new title. Title validation (non-empty, max length) lives in `update_case_meta`, not the endpoint.
 - **Lock cleanup race** (ISSUE-M3-006): after `delete_case`, the case_id is no longer in `_case_locks`. A subsequent `chat_structured` for the same id creates a new lock cleanly.
 
@@ -1073,10 +1132,10 @@ Thin HTTP client + snake↔camel mapper:
 Return `DeadlineResult` for successful calculations; keep returning `str` for error paths (missing `tipo_item`, invalid date, invalid `tipo_prazo`). The system prompt instructs the LLM to relay the error string to the user.
 
 ### `src/advogado_de_bolso/tools/redigir.py`
-Return `DraftedDocument` with `tom: Tom` literal (imported from existing `Tom = Literal[...]` at `tools/redigir.py:24`). Update the docstring to declare the new return shape. Update the sub-agent's user prompt to remove the "Responda APENAS com o texto final" instruction (the sub-agent is now wrapped into a structured envelope, but its actual output is still the prose — see Open Decision #1 below).
+Return `DraftedDocument` with `tom: Tom` literal (imported from existing `Tom = Literal[...]` at `tools/redigir.py:24`). Update the docstring to declare the new return shape. ISSUE-USR-017: **keep the "Responda APENAS com o texto final" instruction** in the sub-agent's user prompt at `redigir.py:101-104`. The Open Decision #1 entry (line 1236) is the authoritative spec, and the Files to Modify section's earlier wording ("remove the 'Responda APENAS com o texto final' instruction") is the line being corrected by this fix. The sub-agent remains a plain string producer; the outer `redigir_documento` function wraps its output into a `DraftedDocument` envelope (filling `tipo`/`tom`/`destinatario` from the function's own arguments). The "APENAS" prompt is a domain-specific safety constraint for the legal-drafting sub-agent — it prevents the sub-agent from emitting JSON envelopes or surrounding commentary that would have to be stripped before being placed in `DraftedDocument.texto`. Removing the prompt would risk the sub-agent emitting JSON which would then have to be re-parsed, doubling the failure surface.
 
 ### `src/advogado_de_bolso/tools/rag.py`
-Return `list[KnowledgeChunk]`. Preserve the "fonte desconhecida" fallback. Preserve the "no results" signal — when the retriever returns nothing, return a single `KnowledgeChunk(fonte="sistema", texto="Nenhum trecho relevante foi encontrado na base de conhecimento.")` so the LLM has an explicit "no results" hint. Update the docstring.
+Return `list[KnowledgeChunk]`. Preserve the "fonte desconhecida" fallback. ISSUE-USR-017: when the retriever returns nothing, return an **empty list `[]`** (NOT a sentinel `KnowledgeChunk(fonte="sistema", ...)`). The previous "no results" sentinel contradicted the test spec (line 1083) and added downstream complexity (the adapter would have to special-case the sentinel, and the SYSTEM_PROMPT's "cite the fonte" wording was ambiguous about whether to cite "sistema"). The empty list is the simplest, most predictable shape: the adapter's `relevant_chunks` falls through, `relevant_title` is `""`, `relevant_content` is `""`, and the system prompt handles the no-results case via the explicit "no relevant info" message. Update the docstring.
 
 ### `src/advogado_de_bolso/agent.py`
 See "Files to Create" section above. Add `@agent.instructions` callback. Update `SYSTEM_PROMPT` to describe the new tool return shapes. Add `STYLE_PROMPTS` and `_current_style` ContextVar.
@@ -1121,7 +1180,8 @@ ISSUE-M3-004: full rewrite. The current `package.json` references `server.ts` in
 - `"preview"`: `"vite preview"` (kept; useful for testing the prod build)
 - `"lint"`: `"tsc --noEmit"` (kept)
 - Remove `dependencies`: `@google/genai`, `express`, `dotenv`, `motion` (all consumed only by the deleted `server.ts`)
-- Remove `devDependencies`: `tsx`, `esbuild`, `@types/express`, `@types/node` (consumed only by the deleted `server.ts`)
+- Remove `devDependencies`: `tsx`, `esbuild`, `@types/express` (consumed only by the deleted `server.ts`)
+- **KEEP** `devDependencies: @types/node` (ISSUE-USR-014): the rewritten `vite.config.ts` (and the kept `lint` script which runs `tsc --noEmit`, see line 1134 below) still consumes Node ambient types. `vite.config.ts` imports `path` from `'path'` (line 3), uses `__dirname` (line 11) for `path.resolve(__dirname, '.')`, and reads `process.env.DISABLE_HMR` (lines 17, 19) for the HMR toggle. None of these compile under `tsc` without `@types/node`. Removing `@types/node` would break `npm run lint` (the `tsc --noEmit` gate, kept on line 1134). The only reason `@types/node` would have been removable is if `vite.config.ts` were rewritten to use `import.meta.url` + `fileURLToPath(new URL('.', import.meta.url))` (still requires `@types/node` for `URL` ambient types in many TS configs) or a pure-browser `URL`/`import.meta` style without `path`/`__dirname`/`process.env` (which the current `vite.config.ts` does not satisfy). We pick the simpler path: keep `@types/node` in `devDependencies`. The earlier claim that `@types/node` is "consumed only by the deleted `server.ts`" is incorrect; `vite.config.ts` and the `tsc --noEmit` lint script are also consumers.
 - Environment variables `GEMINI_API_KEY` and the Express-specific `PORT` are no longer used; the FastAPI server reads its own env (`GOOGLE_API_KEY`, `ADVOGADO_API_HOST`, `ADVOGADO_API_PORT`).
 
 ### `base_frontend/vite.config.ts`
@@ -1141,6 +1201,7 @@ export default defineConfig({
   },
 });
 ```
+ISSUE-USR-014: this spec keeps the existing `path`/`__dirname`/`process.env` usage in the file (the rewrite is a `server` block addition, not a full Node-API removal). The kept Node APIs require `@types/node` to be retained in `devDependencies`; see the `package.json` section above for the cross-reference. The `server.proxy` config from ISSUE-DS-003 is preserved unchanged.
 
 ### `base_frontend/src/App.tsx`
 ISSUE-M3-016: explicitly **delete** the inline `seedCases` (lines 20-130, ~110 lines) and `initialPreferences` (lines 132-144). The plan said "move to `defaults.ts`" but the deletion must be explicit. After the move, `App.tsx` imports them:
@@ -1160,7 +1221,7 @@ import { seedCases, initialPreferences } from "./defaults";
 - `handleSelectCase` → `apiClient.getCase(caseId)`.
 - `handleDeleteCase` → `apiClient.deleteCase(caseId)`.
 - `handleRenameCase` → `apiClient.renameCase(caseId, newTitle)`, which under the hood calls `apiClient.updateCaseMeta(caseId, { title: newTitle })` and issues `PATCH /api/cases/{case_id}` with `{ title }` (ISSUE-IND-002). There is no dedicated `renameCase` REST endpoint; the frontend rename is a PATCH with a `{ title }` body.
-- The `history` field in the request body is removed (server is now the source of truth; the server returns the full chat history with each response).
+- The `history` field in the request body is removed (server is now the source of truth; the server returns the full chat history with each response via the `chat_history: list[ChatMessage]` field on `StructuredChatResponse` per ISSUE-USR-015).
 - Filter out `is_demo` cases when the first real case is created (clear them from local state, never re-add).
 
 ### `base_frontend/src/types.ts`
@@ -1269,7 +1330,7 @@ The following reviewer issues were applied directly to this plan. Each is refere
 | ISSUE-M3-009 | Replaced line numbers with type/method references. |
 | ISSUE-M3-010 | Adapter uses `isinstance(content, (list, tuple))`. |
 | ISSUE-M3-011 | Dropped `TypeAdapter.validate_python` redundant call. |
-| ISSUE-M3-012 | `SYSTEM_PROMPT` now treats `fonte="sistema"` as the no-results signal. |
+| ISSUE-M3-012 | `SYSTEM_PROMPT` now treats an empty `search_knowledge_base` result as the no-results signal (updated again in round 17 per ISSUE-USR-017 to use `[]` rather than the previous `fonte="sistema"` sentinel). |
 | ISSUE-M3-013 | `handleSaveCaseFromChat` PATCH fires only on manual edit. |
 | ISSUE-M3-014 | `cases_path` uses `Field(..., alias="CASES_PATH")`. |
 | ISSUE-M3-015 | Error contract: API catches backend/save exceptions, returns 503. |
@@ -1284,6 +1345,13 @@ The following reviewer issues were applied directly to this plan. Each is refere
 | ISSUE-DS-006 | Adapter logs WARNING for unknown tool names. |
 | ISSUE-DS-007 | `list_all()` scalability constraint in docstring + soft warning at 500+ files. |
 | ISSUE-DS-008 | ContextVar scoping test added; single-task assumption documented. |
+| ISSUE-USR-011 | `AgentRunResult` import path corrected from `pydantic_ai.tools` to `pydantic_ai` (top-level re-export). |
+| ISSUE-USR-012 | `_current_style` imported from `.agent` into `service.py` (added to the import block before the local helper definitions). |
+| ISSUE-USR-013 | `update_case_meta` now acquires the per-case `asyncio.Lock` around the load/validate/save body (mirroring `delete_case`); CLI write safety documented in the cli.py section as atomic `os.replace` via the storage layer. |
+| ISSUE-USR-014 | `@types/node` kept in `devDependencies` (NOT removed); `vite.config.ts` spec retains the existing `path`/`__dirname`/`process.env` usage and the `server.proxy` config from DS-003. |
+| ISSUE-USR-015 | `StructuredChatResponse` augmented with `updated_at: datetime` and `chat_history: list[ChatMessage]`. `chat_structured` populates both before returning. The "server returns the full chat history" claim is now backed by the schema. `WireResponse` alias from ISSUE-002 still type-checks. |
+| ISSUE-USR-016 | Persistence test relaxed: asserts `ToolReturnPart.content` is a `dict` with matching field values (not `isinstance(_, DeadlineResult)`) after JSON round-trip. In-memory `tool_plain` test (line 995) still asserts `isinstance(_, DeadlineResult)`. |
+| ISSUE-USR-017 | Kept the "Responda APENAS com o texto final" prompt in `redigir.py` (line 1076 aligned with Open Decision #1, line 1236). Empty RAG result is `[]` (not the previous sentinel `KnowledgeChunk(fonte="sistema", ...)`); `rag.py` spec (line 1139) and SYSTEM_PROMPT (line 369) updated to match. |
 
 ---
 
