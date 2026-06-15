@@ -2928,3 +2928,33 @@ Note: this project uses an alternative batch numbering (1=contracts, 2=schemas+a
 - The SPA fallback in `api.py` only mounts `/assets` if `REACT_DIST / "assets"` exists; the SPA test currently creates a fake `dist` tree via monkeypatch. The full `base_frontend/dist` build is batch 6+.
 - The CORS preflight test (`test_cors_allows_patch_method`) inspects the `access-control-allow-methods` response header. Browser preflights use this header to confirm PATCH is allowed; without the batch-4 fix (ISSUE-DS-004), the header would have been missing PATCH.
 
+## Implementation Notes
+
+### Batch 5 (CLI rewrite + reviewer-gated buffered streaming)
+
+- **Status:** complete; gate `uv run pytest tests/test_cli.py` and full `uv run pytest` both green (306/306 pass).
+- **Files created / modified:**
+  - `src/advogado_de_bolso/cli.py` — **REWRITTEN**. Reviewer-gated buffered streaming CLI. Stays on `agent.run_stream` (per Open Issue #1 = A); tokens are accumulated into an internal buffer while the user sees a `rich` spinner via `console.status(...)`. After generation completes, `_process_turn` invokes `review_response(...)` with `question`, `response`, `model=settings.full_model_name`, and `model_settings=settings.build_model_settings()`. On approval, the loop appends to `case.chat_history` and `case.model_history`, advances `case.updated_at`, and calls `cases.save(case, cases_path=settings.cases_path)`. On block, the loop renders only `REVIEW_BLOCKED_MESSAGE` and does NOT save. The CLI does NOT use `ChatService` — it persists via the storage layer directly with its own reviewer gate. The `/limpar` slash command creates a fresh in-memory case with a new UUID without overwriting the previously saved case file. The CLI/API concurrent-write limitation (atomic JSON replacement prevents torn JSON, not cross-process lost updates) is documented in the module docstring. The testable surface is exposed as `_process_turn(...)` plus a `TurnResult` dataclass.
+  - `tests/test_cli.py` — **NEW**. 19 tests covering the approved/blocked envelope, reviewer kwargs (including `model` and `model_settings`), two-turn UUID reuse, `/limpar` fresh-case-without-overwrite, and disk persistence. Uses a `FakeAgent` whose `run_stream` returns an async context manager (`FakeStreamResult` / `_StreamCM` / `FakeAgent`) so tests can drive `_process_turn` without invoking a real Pydantic AI agent. The testing strategy (extract a pure async `_process_turn` helper) is documented in the test file's docstring.
+  - `src/advogado_de_bolso/AGENTS.md` — Updated: added a "CLI reviewer-gated buffered streaming" contract bullet, expanded the `cli.py` File Map row, updated the Work Guidance bullet for the CLI.
+  - `tests/AGENTS.md` — Updated: added a `test_cli.py` description bullet.
+  - `AGENTS.md` (root) — Updated: project overview mentions batch 5 completion; File Map row for `cli.py` and a new row for `tests/test_cli.py` are now aligned with the implementation.
+
+- **Gate verification (batch 5):**
+  - `uv run pytest tests/test_cli.py -v` — **19 passed** (test_cli.py).
+  - `uv run pytest -v` — **306 passed** (287 prior + 19 new; no regressions).
+  - `uv run ruff check src/advogado_de_bolso/cli.py tests/test_cli.py` — **All checks passed**.
+  - `uv run ruff check src/ tests/` — **All checks passed**.
+  - `uv run mypy src/advogado_de_bolso/cli.py` — **Success: no issues found**.
+  - `uv run mypy src/` — **Success: no issues found in 22 source files**.
+
+- **Plan spec deviations (batch 5):**
+  - The plan describes a "module-scope helpers `_collect_tool_returns` and `_truncate_history_to_turns`" already living in `service.py`; the CLI does not redefine these. The CLI defines local `_now()` and `_now_ms()` mirroring `service.py` (kept module-private via the underscore prefix) to avoid cross-module coupling for what is essentially one-line clock helpers.
+  - `cli.py` defines its own `REVIEW_BLOCKED_MESSAGE` constant (same wording as `service.REVIEW_BLOCKED_MESSAGE`) so the CLI module is self-contained. `tests/test_cli.py::TestBlockedMessageConstant::test_blocked_message_is_set` pins the equality.
+  - The CLI casts the `IconName` and `ResponseStyle` constants (`CLI_CASE_ICON: IconName = "gavel"`, `CLI_CASE_STYLE: ResponseStyle = "detalhado"`) so `mypy --strict` accepts passing them to `Case(icon_name=..., response_style=...)`. The plan did not pin this typing detail.
+
+- **Known follow-ups (batch 5 → batch 6+):**
+  - The CLI's slash command parsing is inline in `_run_chat_loop`. A small extraction (e.g., `_handle_slash_command(...) -> _SlashResult`) was not required for the gate tests but could improve testability of the slash command surface.
+  - The CLI does not currently support explicit `response_style` selection — the in-memory case default is hardcoded to `"detalhado"` and there is no `/estilo simples` slash command. Adding a style switch is a UX follow-up; the LLM-bound `model_history` and persistence are already wired so the change is non-breaking.
+  - The CLI's spinner uses `console.status`; tests do not exercise the Rich UI surface. Manual smoke-testing in a real terminal is the only check for the spinner/live UX (no headless test driver for `rich.live`).
+
