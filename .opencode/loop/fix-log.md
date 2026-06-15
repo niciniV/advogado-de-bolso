@@ -172,3 +172,23 @@ Compact chronological log of fixer subagent activities.
   - Original source plan is fully consumed (no orphan content); the original 1416-line content is preserved verbatim across the 25 sibling files.
 - **Regression risk against the 60 already-closed issues**: low. The split is structural only; no content was paraphrased, dropped, or merged. The Create/Modify duplication was resolved by placing the full spec once and using a one-line pointer in the duplicate location (per the proposal's §6 Q4 strategy). All 60 closed issues remain in scope of their original sections; the split preserves them verbatim.
 - **Bookkeeping note**: All DEC-001 Status: fields in .opencode/loop/open-issues.md were updated from erified → ixing (BEFORE starting the split) → closed (AFTER completing the split) with a one-line ix-notes: confirming the split was applied. The 3 candidate instructions (mimo DEC-002, mimo DEC-003, deepseek DEC-002) were marked as ddressed (a new sub-status) in notes lines under each, with their status field kept at candidate so the loop still knows they exist.
+
+
+## Round 23 — general (fixer)
+
+- **Date**: 2026-06-15
+- **Fixer**: general
+- **Scope**: 2 verified per-file docs issues from the round-21/22 review cycle (ISSUE-PF-001, ISSUE-PF-002).
+- **Summary**: 2 fixed_pending_review, 0 blocked, 0 untouched, tests: n/a (plan-level docs fixes only).
+- **Files touched**: .opencode/plans/11-frontend-types-and-defaults.md (consolidated duplicate defaults.ts subsections); .opencode/plans/18-frontend-modifications.md (relabeled misleading defaults.ts pointer entry).
+- **Notable fixes**:
+  - **ISSUE-PF-001 (file 11 duplicate defaults.ts subsections):** removed the briefer ### base_frontend/src/defaults.ts (new) subsection (formerly lines 7-9, a strict subset). Kept the heading ### base_frontend/src/defaults.ts (new, additional spec) and the full detailed content from the second occurrence (the server-behavior note, the demo-ID readability requirement, and the "App handlers MUST branch on is_demo" constraint). The ### base_frontend/src/types.ts subsection is preserved unchanged between the header and the consolidated defaults.ts subsection. The file now has exactly one defaults.ts subsection (header lines 1-5, defaults.ts 7-10, types.ts 12-16).
+  - **ISSUE-PF-002 (file 18 line 64 misleading label):** changed ### base_frontend/src/defaults.ts (new, additional spec) to ### base_frontend/src/defaults.ts (new — see 11-frontend-types-and-defaults.md). Body line unchanged. Relabel matches the file's pointer-list convention used by all other entries.
+- **Verification**: No tests run. Both fixes are docs-only; pytest/mypy/uff are not applicable. Post-fix review (round 24) by concurrent reviewers should re-read files 11 and 18 to confirm consolidation and relabel.
+- **Regression risk against the 61 already-closed issues**: low.
+  - ISSUE-M3-005 (is_demo frontend-only marker): file 11 line 12 still says "Add is_demo?: boolean to Case (ISSUE-M3-005). Frontend-only marker." Preserved.
+  - ISSUE-M3-016 (seedCases move to defaults.ts): the consolidated defaults.ts subsection (now lines 7-10) still specifies both initialPreferences (moved from App.tsx lines 132-144) and seedCases (with is_demo: true and 	agText: "DEMO"). Preserved.
+  - The ### base_frontend/src/types.ts subsection (lines 12-16) is unchanged.
+  - The file 18 pointer entry to file 11 is preserved (line 65 still says "see 11-frontend-types-and-defaults.md").
+  - No new regressions introduced.
+- **Bookkeeping note**: Both PF-001 and PF-002 statuses in .opencode/loop/open-issues.md were updated from erified to ixing (BEFORE editing each plan file) to ixed_pending_review (AFTER editing) with one-line ix-notes: and ffected-files: lines. No pre-existing votes or notes from any reviewer were modified. Orchestration state updated to round 23 snapshot.

@@ -61,6 +61,6 @@ Add `is_demo?`; see `11-frontend-types-and-defaults.md`.
 ### `base_frontend/src/components/ChatInterface.tsx`
 Rename `isLoading` to `isSendingMessage`; see `13-frontend-app.md`.
 
-### `base_frontend/src/defaults.ts` (new, additional spec)
+### `base_frontend/src/defaults.ts` (new — see 11-frontend-types-and-defaults.md)
 `initialPreferences` + `seedCases`; see `11-frontend-types-and-defaults.md`.
 

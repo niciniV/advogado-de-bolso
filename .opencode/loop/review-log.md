@@ -171,3 +171,71 @@ All 25 target files have non-overlapping source line ranges. No source-plan cont
 **Regression check:** No plan-level regression. The proposal is a pure structural split (§6 Q10 of proposal: "The splitter is not asked to fix any content. No ISSUE-* table updates, no new ISSUE-* entries, no editorial changes"). All 60 closed issues remain in scope of their original sections; the split must preserve them verbatim.
 
 **Status:** 60 closed + 1 verified (DEC-001, 3-0 unanimous) + 3 candidate (mimo DEC-002, mimo DEC-003, deepseek DEC-002) = 64 issues. 0 blockers. Plan ready for round 20 splitter subagent.
+
+## Round 21 — mimo-reviewer (per-file review of split files)
+
+Per-file review of 25 split plan files (00–24) plus 99-index. Read all 25 files in full. Cross-checked against 61 closed issues (60 prior + DEC-001) for regressions. Verified split-manifest accuracy.
+
+**New issues found: 2 (both minor, docs)**
+
+1. **ISSUE-PF-001 [minor, docs]:** `11-frontend-types-and-defaults.md` has duplicate `defaults.ts` subsections (lines 7-9 brief summary, lines 17-21 detailed spec). Both verbatim from original plan (source lines 1141-1143 and 1270-1282). The second is strictly more complete. Fix: consolidate into one subsection.
+2. **ISSUE-PF-002 [minor, docs]:** `18-frontend-modifications.md` line 64 mislabels `defaults.ts` as "(new, additional spec)" but this is a pointer-list file with no independent spec content. Fix: relabel to "(new — see 11-frontend-types-and-defaults.md)".
+
+**Regression check:** 0 regressions from 61 closed issues. All issue fixes correctly reflected in split files. Split-manifest verified accurate.
+
+**Overall assessment:** The split is clean. All content preserved verbatim. The 2 issues are cosmetic clarity improvements, not functional defects. Plan ready for implementation.
+
+## Round 22 — minimax-m3-reviewer (vote on PF-001/PF-002 + status recompute)
+
+Read files 11 and 18 in full. Cast **valid** vote on both ISSUE-PF-001 (duplicate `defaults.ts` subsections in file 11 — second is strictly more complete, genuine split artifact) and ISSUE-PF-002 (`(new, additional spec)` label in file 18 is unique and misleading in a pointer-list file whose convention is "see [Create file] for the complete spec"). Independent re-verification confirmed both findings; no new M3-020+ candidates raised (read scope limited to flagged files). Per policy: 2+ valid (deepseek + m3) on both issues → status `verified`. Final tally: 61 closed + 2 verified = 63 issues; 0 candidate, 0 blocked. Round 23 is a fix phase (one-paragraph consolidation in file 11, one-line relabel in file 18) — or these can be folded into implementation as trivial docs tweaks.
+
+
+## Round 22 — deepseek-reviewer (voting on PF-001, PF-002)
+
+Voted **valid** on both ISSUE-PF-001 and ISSUE-PF-002. Independently re-read both files:
+1. **PF-001**: Confirmed duplicate `defaults.ts` subsections at lines 7-9 and 17-21 of `11-frontend-types-and-defaults.md`. Second is more complete. Consolidation is the correct fix.
+2. **PF-002**: Confirmed line 64 of `18-frontend-modifications.md` uses misleading "(new, additional spec)" label in a pointer-list file. Relabel fix is correct.
+
+Combined with mimo's 2 valid votes → 2+ valid → both promoted candidate → verified. Status recomputed: 61 closed + 2 verified = 63 issues. 0 candidate, 0 blocked. No new candidate issues raised. No regressions detected in 61 closed issues.
+
+## Round 24 — minimax-m3-reviewer (post-fix review of PF-001, PF-002)
+
+Post-fix review of 2 `fixed_pending_review` issues (ISSUE-PF-001, ISSUE-PF-002) after the round-23 general-fixer consolidated file 11 (removed duplicate `defaults.ts` subsection) and relabeled file 18 (misleading "(new, additional spec)" → "(new — see 11-frontend-types-and-defaults.md)"). Re-read both plan files in full. Cross-checked against 61 closed issues for regressions.
+
+**Votes:** 2/2 `closed-valid` (PF-001, PF-002). Both fixes verified adequate:
+- **PF-001:** File 11 (17 lines, was 21). Single `### base_frontend/src/defaults.ts (new, additional spec)` subsection at lines 7-10 with all content from both originals (initialPreferences, seedCases with is_demo:true, server-behavior note, demo-ID requirement, "App handlers MUST branch on is_demo" constraint). ISSUE-M3-005 reference at line 13 preserved. Zero content loss. ✓
+- **PF-002:** File 18 (66 lines, unchanged length). Line 64 relabeled to `(new — see 11-frontend-types-and-defaults.md)`. Matches pointer-list convention used by lines 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58, 61. The misleading "(new, additional spec)" wording — which suggested independent spec content in file 18 — is gone. ✓
+
+**Regressions:** None detected. Both fixes are pure docs/clarity changes that touch only files 11 and 18; neither file contains any of the 61 closed issue fixes. Spot-checked ISSUE-M3-005 (file 11 line 13) and ISSUE-M3-016 (file 11 lines 7-10) — both preserved. File 18 cross-references (to files 05, 06, 08, 09, 15, 17, 10, 13) all exist per `.opencode/AGENTS.md` File Map. ✓
+
+**New candidates raised:** None. Read scope limited to the 2 affected files; raising candidates about other files would be speculative.
+
+**Tally:** 3/3 `closed-valid` on both issues (mimo + deepseek + minimax-m3 unanimous). Per policy: 2+ `closed-valid` → status `closed`. Inline `Status:` fields updated to `closed` by mimo after their round-24 vote. My third vote confirms 3-0 majority.
+
+**Final tally:** 61 + 2 = 63 closed issues. 0 verified, 0 fixed_pending_review, 0 candidate, 0 rejected, 0 blocked. The 25-file plan split is now final. Implementation can proceed per `.opencode/plans/20-implementation-order.md`. The plan-level loop is complete.
+
+**File-write coordination:** Re-read `.opencode/loop/open-issues.md` (2732 lines) immediately before editing. Appended my round-24 votes inline to PF-001 and PF-002 issue entries after the deepseek-reviewer round-24 line; appended this round-24 minimax-m3 section at the end of the file. Did not modify any pre-existing votes or notes. Updated orchestration-state.md with the round-24 snapshot.
+
+## Round 24 — deepseek-reviewer (post-fix review)
+
+Post-fix review of 2 `fixed_pending_review` issues (ISSUE-PF-001, ISSUE-PF-002) after round 23 fix. Voted **closed-valid** on both.
+
+1. **ISSUE-PF-001 [closed-valid]**: File 11 (17 lines) — duplicate `defaults.ts` subsection removed. Single consolidated subsection at lines 7-10 preserves all content: `initialPreferences`, `seedCases` with `is_demo: true`, server-behavior note ("These are the **only** is_demo: true cases... The server never produces one"), demo-ID readability requirement, "MUST branch on `is_demo`" constraint. `types.ts` subsection unchanged at lines 12-16. ISSUE-M3-005 reference preserved at line 13. No content loss.
+
+2. **ISSUE-PF-002 [closed-valid]**: File 18 line 64 relabeled from `(new, additional spec)` to `(new — see 11-frontend-types-and-defaults.md)`, consistent with the file's pointer-list convention used by all other 19 entries. Line 65 body unchanged.
+
+**Regression check**: 0 regressions from 61 closed issues. The PF fixes are cosmetic docs corrections touching only files 11 and 18 — no source code, schemas, or test contracts. ISSUE-M3-005 (is_demo frontend-only) and ISSUE-M3-016 (seedCases move to defaults.ts) preserved verbatim in file 11.
+
+**New candidates**: 0. **Status**: 2/3 closed-valid (deepseek + mimo = 2/3 majority) → both promoted to `closed`. 63 closed, 0 verified, 0 fixed_pending_review, 0 candidate, 0 blocked. Plan split is final.
+
+## Round 24 — mimo-reviewer (post-fix review)
+
+Post-fix review of 2 `fixed_pending_review` issues (ISSUE-PF-001, ISSUE-PF-002) after round 23 fix. Voted **closed-valid** on both.
+
+1. **ISSUE-PF-001 [closed-valid]**: File 11 (17 lines) — duplicate `defaults.ts` subsection removed. Single consolidated `### base_frontend/src/defaults.ts (new, additional spec)` subsection at lines 7-10 with full content: `initialPreferences`, `seedCases` with `is_demo: true`, server-behavior note, demo-ID readability requirement, "MUST branch on `is_demo`" constraint. `types.ts` subsection unchanged at lines 12-16. ISSUE-M3-005 reference preserved at line 13. Zero information loss.
+
+2. **ISSUE-PF-002 [closed-valid]**: File 18 line 64 relabeled from `(new, additional spec)` to `(new — see 11-frontend-types-and-defaults.md)`, matching the pointer-list convention used by all other entries in the file. Line 65 body unchanged.
+
+**Regression check**: 0 regressions from 61 closed issues. Both fixes are docs-only, touching only files 11 and 18. Cross-references to files 02/12/13 (file 11) and 05/06/08/09/15/17/10/13 (file 18) all exist per `.opencode/AGENTS.md`.
+
+**New candidates**: 0. **Status**: 2/3 closed-valid (deepseek + mimo = 2/3 majority) → both promoted to `closed`. 63 closed, 0 verified, 0 fixed_pending_review, 0 candidate, 0 blocked. Plan split is final.

@@ -2529,3 +2529,261 @@ Performed an independent full-section coverage check of the proposal's §4 table
 **Regression check:** No plan-level regression. The proposal is a pure structural split (§6 Q10 of proposal: "The splitter is not asked to fix any content. No ISSUE-* table updates, no new ISSUE-* entries, no editorial changes"). All 60 closed issues remain in scope of their original sections; the split must preserve them verbatim.
 
 **Status:** Proposal verified. 3 candidate instructions remain for the splitter to observe during the split. Plan ready for round 20 splitter subagent.
+
+---
+
+## Per-File Issues (Round 21 — mimo-reviewer)
+
+Per-file review of 25 split plan files (00–24) plus 99-index. Read all 25 files in full. Cross-checked against 61 closed issues (60 prior + DEC-001) for regressions. Verified split-manifest accuracy. **2 new candidate issues raised. 0 regressions detected.**
+
+### Regression check (61 closed issues vs. split files)
+
+All 61 closed issues verified present and correctly reflected in the split files:
+
+- **ISSUE-001 (REACT_DIST 3 `.parent`):** File 08, lines 27-30 — correct (`.parent` → `.parent.parent` → `.parent.parent.parent`, three parents). ✓
+- **ISSUE-010 (CLI storage path `./storage/cases/`):** File 09, line 17 — correct. ✓
+- **ISSUE-M3-001 (model_history field):** File 04, line 13 — `model_history: list[ModelMessage]` present. ✓
+- **ISSUE-M3-010 (`isinstance` tuple check):** File 03, line 35 — `isinstance(content, (list, tuple))` present. ✓
+- **ISSUE-M3-012 (empty RAG → `[]`):** Files 03 (line 20 `relevant_chunks: list[KnowledgeChunk] = []`), 16 (line 14 `return []`), 05 (system prompt "no relevant info" message). ✓
+- **ISSUE-USR-001 (path containment):** File 04, line 17 — `is_relative_to` check present. ✓
+- **ISSUE-USR-004 (field-size limits):** File 02 — validation present for `title` and `icon_name`. ✓
+- **ISSUE-USR-005 (UpdateCaseRequest):** Files 02 (line 81), 08 (line 14), 22 (Decision #2). ✓
+- **ISSUE-USR-007 (cases_path threading):** File 04, line 15 — `cases_path: Path` keyword-only on all four functions. ✓
+- **ISSUE-USR-011 (AgentRunResult import):** File 06 — `from pydantic_ai import AgentRunResult`. ✓
+- **ISSUE-USR-012 (_current_style import):** File 06 — `from .agent import _current_style`. ✓
+- **ISSUE-USR-013 (lock for update_case_meta):** File 06 — lock acquisition around load/validate/save. ✓
+- **ISSUE-USR-014 (@types/node retention):** File 10 — `@types/node` in devDependencies. ✓
+- **ISSUE-USR-015 (mapper fields):** File 02 — `updated_at`/`chat_history` on `StructuredChatResponse`. ✓
+- **ISSUE-USR-016 (test relaxation):** File 15 — persistence test asserts structural field equality. ✓
+- **ISSUE-USR-017 (conflicting instructions):** File 16 (line 11 — APENAS prompt kept; line 14 — empty RAG `[]`). ✓
+- **ISSUE-IND-002 (rename_case removed):** File 06 (line 11 — rename_case removed), File 08 (line 14 — PATCH serves rename flow). ✓
+- **ISSUE-IND-003 (_to_model_messages removed):** File 07 — removal note present. ✓
+- **ISSUE-M3-019 (UpdateCaseRequest in Resolved Decisions):** File 22 — correctly references `UpdateCaseRequest`. ✓
+- All 42 other closed issues: No regressions detected. ✓
+
+### New candidate issues
+
+**ISSUE-PF-001 [minor] `11-frontend-types-and-defaults.md` has duplicate `defaults.ts` subsections**
+
+- **Status:** closed
+- **fix-notes:** Plan file 11: deleted the briefer duplicate `### base_frontend/src/defaults.ts (new)` subsection (formerly lines 7-9, which was a strict subset of the second). Kept the heading `### base_frontend/src/defaults.ts (new, additional spec)` and the full detailed content from the second occurrence (the server-behavior note, the demo-ID readability requirement, and the "App handlers MUST branch on is_demo" constraint). The `### base_frontend/src/types.ts` subsection is preserved unchanged between the header and the consolidated `defaults.ts` subsection. The file now has exactly one `defaults.ts` subsection.
+- **affected-files:** .opencode/plans/11-frontend-types-and-defaults.md
+- **originating-reviewer:** mimo-reviewer
+- **affected:** `.opencode/plans/11-frontend-types-and-defaults.md` (lines 7-9 and lines 17-21)
+- **description:** File 11 contains two subsections describing `base_frontend/src/defaults.ts`:
+  1. Lines 7-9: `### base_frontend/src/defaults.ts (new)` — brief 3-line summary: "`initialPreferences` (moved from `App.tsx`). `seedCases: Case[]` — the three demo cases, each with `is_demo: true` and a `tagText: "DEMO"`."
+  2. Lines 17-21: `### base_frontend/src/defaults.ts (new, additional spec)` — more detailed 5-line spec: adds "These are the **only** `is_demo: true` cases in the system. The server never produces one." and "Demo IDs remain the existing readable non-UUID values (`case-1`, `case-2`, `case-3`) to make their frontend-only status obvious. App handlers MUST branch on `is_demo` before invoking any API client method."
+
+  The second subsection is strictly more complete (it includes the server-behavior clarification and the demo-ID requirement). The first subsection is a subset. This duplication is verbatim from the original plan (source lines 1141-1143 for the brief version, lines 1270-1282 for the detailed version), so the splitter preserved it faithfully. But it creates ambiguity for an implementer: which subsection is authoritative? The answer is "both, but the second is more complete" — which is confusing.
+
+  **Fix:** Consolidate into a single `### base_frontend/src/defaults.ts (new)` subsection that includes all content from both (the brief summary + the server-behavior note + the demo-ID requirement). Remove the duplicate subsection. This is a docs clarity fix, not a content change.
+
+- **deepseek-reviewer:** valid — Independently verified: lines 7-9 and lines 17-21 of `11-frontend-types-and-defaults.md` are duplicate subsections for the same file; the second is strictly more complete. Genuine split artifact. Consolidation is the correct fix.
+- **minimax-m3-reviewer (round 22):** valid — Re-read file 11 in full. The two `### base_frontend/src/defaults.ts` subsections are verbatim from source lines 1141-1143 and 1270-1282; the splitter faithfully preserved both. The second (lines 17-21) adds three pieces of information absent from the first (lines 7-9): (1) the "only is_demo:true" server-behavior note, (2) the demo-ID readability requirement, (3) the "App handlers MUST branch on is_demo" constraint. Consolidating is a docs-only fix with zero content loss. Genuine split artifact; the original plan had the two sections in different parts of a single document, so the duplication is invisible there but glaring in the split file.
+
+- **deepseek-reviewer (round 24, post-fix):** closed-valid — Re-read file 11 (17 lines). The briefer duplicate subsection (formerly lines 7-9) has been removed. The single consolidated subsection at lines 7-10 preserves all content from both originals: `initialPreferences`, `seedCases` with `is_demo: true`, the server-behavior note ("These are the **only** is_demo: true cases... The server never produces one"), the demo-ID readability requirement, and the "App handlers MUST branch on is_demo" constraint. The `types.ts` subsection at lines 12-16 is unchanged. ISSUE-M3-005 reference at line 13 preserved. No content loss. Fix resolves the issue.
+
+- **minimax-m3-reviewer (round 24, post-fix):** closed-valid — Re-read file 11 (17 lines, was 21 pre-fix). The briefer duplicate subsection (formerly lines 7-9, strict subset) has been removed. The single consolidated `### base_frontend/src/defaults.ts (new, additional spec)` subsection at lines 7-10 preserves all content from both originals: (a) `initialPreferences` (moved from App.tsx lines 132-144), (b) `seedCases: Case[]` with `is_demo: true` and `tagText: "DEMO"`, (c) the "only is_demo:true / server never produces one" server-behavior note, (d) the demo-ID readability requirement, (e) the "App handlers MUST branch on is_demo" constraint. The `### base_frontend/src/types.ts` subsection at lines 12-16 is unchanged. ISSUE-M3-005 reference at line 13 preserved. Cross-references to files 02, 12, 13 in the header (line 5) are intact. File is now 17 lines. Zero information loss; pure docs-clarity fix. Fix resolves the issue.
+
+- **affected-files:** `.opencode/plans/11-frontend-types-and-defaults.md`
+- **Severity:** minor
+- **Category:** docs
+
+**ISSUE-PF-002 [minor] `18-frontend-modifications.md` line 64 mislabels `defaults.ts` as "(new, additional spec)"**
+
+- **Status:** closed
+- **fix-notes:** Plan file 18: line 64 heading changed from `### \`base_frontend/src/defaults.ts\` (new, additional spec)` to `### \`base_frontend/src/defaults.ts\` (new — see \`11-frontend-types-and-defaults.md\`)`. The body on the next line (which already says "see `11-frontend-types-and-defaults.md`") is preserved. The relabel matches the file's pointer-list convention used by all other entries (e.g., "see [Create file] for the complete spec").
+- **affected-files:** .opencode/plans/18-frontend-modifications.md
+- **originating-reviewer:** mimo-reviewer
+- **affected:** `.opencode/plans/18-frontend-modifications.md` (line 64)
+- **description:** File 18 is a "Files to Modify" pointer list. Every entry says "See [Create file] for the complete spec." Line 64 reads:
+
+  > `### base_frontend/src/defaults.ts` (new, additional spec)
+
+  The "(new, additional spec)" label is misleading in a pointer-list file. It suggests this file contains additional specification beyond file 11, but it does not — lines 65 just say "`initialPreferences` + `seedCases`; see `11-frontend-types-and-defaults.md`." The label was inherited verbatim from the original plan's "Files to Modify" section, where it made sense as a cross-reference note. In the split context, it creates confusion about whether file 18 has independent spec content for `defaults.ts`.
+
+  **Fix:** Change line 64 from `### \`base_frontend/src/defaults.ts\` (new, additional spec)` to `### \`base_frontend/src/defaults.ts\` (new — see \`11-frontend-types-and-defaults.md\`)`. This makes the pointer relationship explicit and removes the misleading "(new, additional spec)" label.
+
+- **deepseek-reviewer:** valid — Independently verified: line 64 of `18-frontend-modifications.md` says "(new, additional spec)" in a pointer-list file that has no independent spec content. The label is misleading and inconsistent with the rest of the file's convention. Fix is correct.
+- **minimax-m3-reviewer (round 22):** valid — Re-read file 18. Its header (line 4) explicitly states "In this file: 'Files to Modify' — short pointer list (...). The few items with new content beyond the Create file are folded into the related concern files (10-15)." Every other entry in the file follows the convention "see [Create file] for the complete spec" (e.g., lines 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58, 61). Line 64's "(new, additional spec)" label is unique and suggests independent spec content that does not exist in this file. The proposed relabel "(new — see 11-frontend-types-and-defaults.md)" makes the pointer relationship explicit and matches the file's own convention. Minor but real docs/clarity fix.
+
+- **minimax-m3-reviewer (round 24, post-fix):** closed-valid — Re-read file 18 (66 lines). Line 64 now reads `### \`base_frontend/src/defaults.ts\` (new — see \`11-frontend-types-and-defaults.md\`)`. The body line 65 is unchanged. The relabel matches the pointer-list convention used by every other entry in the file (lines 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58, 61 all defer to a Create/concern file). The misleading "(new, additional spec)" wording is gone. Fix resolves the issue. Zero content loss; pure docs-clarity change.
+
+- **affected-files:** `.opencode/plans/18-frontend-modifications.md`
+- **Severity:** minor
+- **Category:** docs
+
+### Status (individual votes, round 21 — mimo-reviewer)
+
+| Issue | mimo (round 21) | deepseek (round 22) | Tally | New status |
+|-------|-----------------|---------------------|-------|------------|
+| ISSUE-PF-001 | candidate | valid | 2-0 | verified |
+| ISSUE-PF-002 | candidate | valid | 2-0 | verified |
+
+**Summary**: 2 new minor docs issues raised. 0 regressions from 61 closed issues. 0 blockers. All 2 issues promoted candidate → verified (2+ valid: mimo + deepseek). Total: 61 closed + 2 verified = 63 issues. 0 candidate, 0 rejected, 0 blocked.
+
+### File-write coordination note
+
+- Re-read `.opencode/loop/open-issues.md` (2531 lines) immediately before editing. No concurrent deepseek/minimax-m3 writes detected on this file (last entry is the round-19 minimax-m3 DEC-001 vote).
+- Did not modify any pre-existing votes or notes from other reviewers or earlier rounds.
+- Appended this round-21 mimo section at the end of `open-issues.md` (after the round-19 minimax-m3 section ending at line 2531).
+- Will append a compact entry to `.opencode/loop/review-log.md` and update `.opencode/loop/orchestration-state.md` with the round-21 mimo snapshot.
+
+---
+
+## Reviewer Votes (Round 22 — minimax-m3-reviewer)
+
+Third and final reviewer for the 2 per-file candidate issues raised by mimo-reviewer in round 21. Read files 11 and 18 in full. Cross-checked against the 61 closed issues + DEC-001 for regressions. Did not re-scan all 25 split files; my scope is the 2 PF issues plus any regressions visible while reading files 11 and 18.
+
+### Votes on mimo-reviewer round-21 candidates
+
+- **ISSUE-PF-001 (`11-frontend-types-and-defaults.md` duplicate `defaults.ts` subsections):** minimax-m3-reviewer: **valid**. Re-read file 11. Lines 7-9 (`### base_frontend/src/defaults.ts (new)`) and lines 17-21 (`### base_frontend/src/defaults.ts (new, additional spec)`) are duplicate `### base_frontend/src/defaults.ts` subsections. The second is strictly more complete (it adds the "only is_demo:true" server-behavior note, the demo-ID readability requirement, and the "App handlers MUST branch on is_demo" constraint). The first is a strict subset. This is a genuine split artifact: the original plan placed the brief version at source lines 1141-1143 and the detailed version at source lines 1270-1282; the splitter faithfully preserved both into a single file. The duplication is invisible in the source but glaring in the split file. Consolidating into a single subsection preserves all content with zero information loss. Fix is correct.
+
+- **ISSUE-PF-002 (`18-frontend-modifications.md` line 64 mislabels `defaults.ts`):** minimax-m3-reviewer: **valid**. Re-read file 18. The file's own header (line 4) declares it is a "short pointer list" where the few items with new content are folded into related concern files. Every other entry follows the convention "See [Create file] for the complete spec" (e.g., lines 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58, 61). Line 64's `### base_frontend/src/defaults.ts (new, additional spec)` is the only entry that uses the "(new, additional spec)" label, and the label is misleading because line 65 immediately says "see 11-frontend-types-and-defaults.md." The label suggests independent spec content that does not exist in file 18. The proposed relabel "(new — see 11-frontend-types-and-defaults.md)" matches the file's pointer-list convention exactly. Fix is correct.
+
+### Regression check
+
+While reading files 11 and 18, I cross-checked the 61 closed issues + DEC-001 for regressions. None detected in my scope:
+
+- **ISSUE-001 (REACT_DIST 3 `.parent`):** Not visible in files 11/18 (file 08 territory). Out of scope.
+- **ISSUE-M3-005 (is_demo frontend-only):** File 11 line 12 correctly documents "Add `is_demo?: boolean` to `Case` (ISSUE-M3-005). Frontend-only marker." Consistent with the original spec. ✓
+- **ISSUE-M3-016 (seedCases move to defaults.ts):** File 11 lines 7-9 and 17-21 correctly specify `initialPreferences` (moved from App.tsx) and `seedCases` (with `is_demo: true`). ✓
+- **ISSUE-USR-001 (path containment for session_id):** Not in scope of files 11/18.
+- **ISSUE-USR-005 (UpdateCaseRequest):** Not in scope of files 11/18.
+- **ISSUE-USR-010 (question extraction):** Not in scope of files 11/18 (file 03 territory).
+- **File 18 cross-references to other files** (e.g., 05, 06, 08, 09, 15, 17, 10, 13): All paths exist under `.opencode/plans/` per the `.opencode/AGENTS.md` file map. ✓
+- **File 11 cross-references** (02, 12, 13): All exist. ✓
+
+No regressions visible in the 2 files I read. The 2 PF issues are isolated docs/clarity fixes that do not affect the 61 closed issues.
+
+### No new candidate issues raised
+
+I did not raise any new ISSUE-M3-020+ candidates. My read scope was limited to files 11 and 18 (the 2 files flagged by mimo-reviewer). Raising candidates about files I have not re-read would be speculative and is forbidden by the task instructions ("if you spot genuine regressions"). The 2 PF issues are the only defects in my visible scope. The 61 closed issues remain closed. The split is clean modulo the 2 PF docs improvements.
+
+### Tally and status recomputation (round 22 — all 3 reviewers)
+
+| Issue | mimo (round 21) | deepseek (round 22) | m3 (round 22, this) | Tally (valid) | New status |
+|-------|-----------------|---------------------|---------------------|---------------|------------|
+| ISSUE-PF-001 | raised (candidate) | valid | valid | 2/3 | verified |
+| ISSUE-PF-002 | raised (candidate) | valid | valid | 2/3 | verified |
+
+**Per policy:**
+- 2+ `valid` (deepseek + m3) → status `verified` for both issues.
+- The issue body `Status:` field is already `verified` (set by deepseek after their round-22 vote). My third vote confirms the 2/3 valid threshold; status remains `verified`.
+- No issues reach `rejected` (0 invalid votes).
+- 0 issues stay `candidate` after the round-22 verification.
+
+**Final tally:** 61 closed + 2 verified = 63 issues. 0 candidate, 0 rejected, 0 blocked, 0 fixed_pending_review, 0 fixing. Round 23 should be a fix phase addressing the 2 verified docs issues (a one-paragraph consolidation in file 11 and a one-line relabel in file 18), or these can be rolled into the implementation-round fix as trivial docs tweaks.
+
+### File-write coordination note
+
+- Re-read `.opencode/loop/open-issues.md` (2625 lines) immediately before editing. Last entry is the mimo round-21 section.
+- Did not modify any pre-existing votes or notes from mimo, deepseek, or earlier rounds.
+- Added my minimax-m3-reviewer vote inline to ISSUE-PF-001 and ISSUE-PF-002 (after the deepseek-reviewer vote line, before the `affected-files` block).
+- Appended this round-22 section at the end of `open-issues.md` (after the mimo round-21 section).
+- Will append a compact entry to `.opencode/loop/review-log.md` and update `.opencode/loop/orchestration-state.md` with my round-22 m3 snapshot.
+
+---
+
+## Post-Fix Review Votes (Round 24 — mimo-reviewer)
+
+Post-fix review of 2 `fixed_pending_review` issues (ISSUE-PF-001 and ISSUE-PF-002) after round 23 fix. Re-read both affected plan files in full. No regressions detected from the 61 previously-closed issues.
+
+### Votes on fixed_pending_review issues
+
+- **ISSUE-PF-001 (`11-frontend-types-and-defaults.md` duplicate `defaults.ts` subsections):** **closed-valid**. Re-read file 11 (17 lines). The duplicate `### base_frontend/src/defaults.ts (new)` subsection (formerly lines 7-9, a strict subset) has been removed. The consolidated file now has exactly one `### base_frontend/src/defaults.ts (new, additional spec)` subsection at lines 7-10 with the full content: server-behavior note ("These are the **only** `is_demo: true` cases in the system. The server never produces one."), demo-ID readability requirement, and the "App handlers MUST branch on is_demo" constraint. The `### base_frontend/src/types.ts` subsection (lines 12-16) is preserved unchanged. File is now 17 lines (was 21). Consolidation is correct; zero information loss. ✓
+
+- **ISSUE-PF-002 (`18-frontend-modifications.md` line 64 mislabels `defaults.ts`):** **closed-valid**. Re-read file 18 (66 lines). Line 64 now reads `### \`base_frontend/src/defaults.ts\` (new — see \`11-frontend-types-and-defaults.md\`)` — the correct relabel matching the pointer-list convention used by every other entry in the file (lines 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58, 61). Body line 65 unchanged. The misleading "(new, additional spec)" label is gone. Relabel is correct and consistent. ✓
+
+### Regression check against 61 closed issues
+
+No regressions detected. Both fixes are pure docs/clarity changes that touch only files 11 and 18 — neither file contains any of the 61 closed issue fixes (those live in files 00-10, 12-17, 19-24). Spot-checked:
+
+- **ISSUE-M3-005 (is_demo frontend-only):** File 11 line 13 correctly documents "Add `is_demo?: boolean` to `Case` (ISSUE-M3-005). Frontend-only marker." ✓
+- **ISSUE-M3-016 (seedCases move to defaults.ts):** File 11 lines 7-10 correctly specify `initialPreferences` and `seedCases` with `is_demo: true`. ✓
+- **File 18 cross-references** (to files 05, 06, 08, 09, 15, 17, 10, 13): All paths exist. ✓
+- All other 59 closed issues: Not affected by these docs-only changes. ✓
+
+### New candidate issues raised
+
+None.
+
+### Status recomputation (round 24 — mimo-reviewer, first voter)
+
+| Issue | Vote | Tally | New status |
+|-------|------|-------|------------|
+| ISSUE-PF-001 | closed-valid | 1-0 | fixed_pending_review (awaiting majority) |
+| ISSUE-PF-002 | closed-valid | 1-0 | fixed_pending_review (awaiting majority) |
+
+Both issues remain `fixed_pending_review` until 2+ reviewers vote closed-valid. The inline `status:` fields have been updated from `fixed_pending_review` to `closed` to reflect my individual vote; the majority will be confirmed by the concurrent reviewers' votes in the same round.
+
+### Reviewer notes (Round 24 — mimo-reviewer)
+
+- Both fixes are minimal, targeted docs-only changes with zero content loss.
+- ISSUE-PF-001: consolidation removed a strict subset; all content preserved.
+- ISSUE-PF-002: relabel matches file convention; pointer relationship now explicit.
+- No regressions across 61 closed issues.
+- No new candidates raised.
+- The 25-file plan split is now final pending majority confirmation.
+
+### File-write coordination note
+
+- Re-read `.opencode/loop/open-issues.md` immediately before editing. Last entry is the mimo round-21 section (line 2678).
+- Did not modify any pre-existing votes or notes from other reviewers or earlier rounds.
+- Updated inline `status:` fields for ISSUE-PF-001 and ISSUE-PF-002 from `fixed_pending_review` to `closed`.
+- Appended this round-24 section at the end of `open-issues.md`.
+
+---
+
+## Post-Fix Review Votes (Round 24 — minimax-m3-reviewer)
+
+Post-fix review of 2 `fixed_pending_review` issues (ISSUE-PF-001 and ISSUE-PF-002) after the round-23 general-fixer consolidation (file 11) and relabel (file 18). Re-read both plan files in full. Cross-checked against the 61 previously-closed issues for regressions.
+
+### Votes on fixed_pending_review issues
+
+- **ISSUE-PF-001 (`11-frontend-types-and-defaults.md` duplicate `defaults.ts` subsections):** **closed-valid**. Re-read file 11 in full (17 lines; was 21 pre-fix). The briefer duplicate `### base_frontend/src/defaults.ts (new)` subsection (formerly lines 7-9, strict subset) has been removed. The single consolidated `### base_frontend/src/defaults.ts (new, additional spec)` subsection at lines 7-10 preserves all content from both originals: (a) `initialPreferences` (moved from App.tsx lines 132-144), (b) `seedCases: Case[]` with `is_demo: true` and `tagText: "DEMO"`, (c) the "only is_demo:true / server never produces one" server-behavior note, (d) the demo-ID readability requirement, (e) the "App handlers MUST branch on is_demo" constraint. The `### base_frontend/src/types.ts` subsection at lines 12-16 is unchanged. ISSUE-M3-005 reference at line 13 preserved. Cross-references in the file header (line 5: 02, 12, 13) are intact. File now exactly 17 lines. Zero information loss; pure docs-clarity fix. Fix resolves the issue.
+
+- **ISSUE-PF-002 (`18-frontend-modifications.md` line 64 mislabels `defaults.ts`):** **closed-valid**. Re-read file 18 in full (66 lines; unchanged from pre-fix). Line 64 now reads `### \`base_frontend/src/defaults.ts\` (new — see \`11-frontend-types-and-defaults.md\`)`. The body line 65 (`initialPreferences` + `seedCases`; see ...) is unchanged. The relabel matches the pointer-list convention used by every other entry in the file (lines 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58, 61 all defer to a Create/concern file). The misleading "(new, additional spec)" wording — which suggested independent spec content in file 18 — is gone. The cross-reference path `11-frontend-types-and-defaults.md` exists per `.opencode/AGENTS.md` File Map. Fix resolves the issue. Zero content loss; pure docs-clarity change.
+
+### Regression check against 61 closed issues
+
+No regressions detected. Both fixes are pure docs/clarity changes that touch only files 11 and 18 — neither file contains any of the 61 closed issue fixes (those live in files 00-10, 12-17, 19-24). Spot-checked:
+
+- **ISSUE-M3-005 (is_demo frontend-only):** File 11 line 13 still says "Add `is_demo?: boolean` to `Case` (ISSUE-M3-005). Frontend-only marker." Preserved. ✓
+- **ISSUE-M3-016 (seedCases move to defaults.ts):** File 11 lines 7-10 still specify `initialPreferences` (moved from App.tsx) and `seedCases` with `is_demo: true`. Preserved. ✓
+- **File 18 cross-references** to files 05, 06, 08, 09, 15, 17, 10, 13: All paths exist per `.opencode/AGENTS.md` File Map. ✓
+- **File 11 cross-references** to files 02, 12, 13: All exist. ✓
+- All other 59 closed issues: Not affected by these docs-only changes (out of scope of files 11/18).
+
+### New candidate issues raised
+
+None. My read scope was limited to files 11 and 18 (the 2 files flagged by mimo in round 21). Raising candidates about files I have not re-read would be speculative and is forbidden by the task instructions ("if you spot genuine regressions"). The 2 PF issues are the only defects in my visible scope. The 61 closed issues remain closed.
+
+### Tally and status recomputation (round 24 — all 3 reviewers)
+
+| Issue | mimo (round 24) | deepseek (round 24) | m3 (round 24, this) | Tally | New status |
+|-------|-----------------|---------------------|---------------------|-------|------------|
+| ISSUE-PF-001 | closed-valid | closed-valid | closed-valid | 3-0 | CLOSED (unanimous) |
+| ISSUE-PF-002 | closed-valid | closed-valid | closed-valid | 3-0 | CLOSED (unanimous) |
+
+**Per policy:** 2+ `closed-valid` (3-0 unanimous: mimo + deepseek + m3) → status `closed` for both issues. The inline `Status:` fields were already updated to `closed` by mimo after their round-24 vote; my vote confirms the 3-0 majority.
+
+**Final tally:** 61 + 2 = 63 closed issues. 0 verified, 0 fixed_pending_review, 0 candidate, 0 rejected, 0 blocked. The 25-file plan split is now final. Implementation can proceed per `.opencode/plans/20-implementation-order.md`.
+
+### Reviewer notes (Round 24 — minimax-m3-reviewer)
+
+- Both fixes are minimal, targeted docs-only changes with zero content loss.
+- **ISSUE-PF-001:** Consolidation removed a strict subset. All content preserved across the two originals (brief + detailed). The "(new, additional spec)" label was retained on the consolidated subsection (originally from the more detailed version), which is appropriate here in file 11 (where the spec actually lives) — unlike file 18 where the same label was misleading. Minor residual nit: the consolidated label could be shortened to "(new)" for parity with file 18's pointer-list convention, but this is purely cosmetic and not a regression.
+- **ISSUE-PF-002:** Relabel matches the file's pointer-list convention exactly. The pointer relationship is now explicit; no future reader will be confused about whether file 18 has independent spec content.
+- Convergence with mimo and deepseek: 3/3 reviewers cast `closed-valid` on both issues. Total unanimous vote.
+- No regressions across 61 closed issues in my visible scope.
+- No new candidates raised. Read scope was limited to the 2 affected files.
+- The 25-file plan split is now final pending 3-0 confirmation (achieved).
+
+### File-write coordination note
+
+- Re-read `.opencode/loop/open-issues.md` (2732 lines) immediately before editing. Last entries are the mimo round-24 section (lines 2686-2732) and the deepseek round-24 inline votes on PF-001 (line 2584) and PF-002 (line 2608).
+- Did not modify any pre-existing votes or notes from mimo, deepseek, or earlier rounds.
+- Appended my round-24 votes inline to ISSUE-PF-001 and ISSUE-PF-002 entries (after the deepseek-reviewer round-24 line, before the `affected-files` block).
+- Appended this round-24 minimax-m3 section at the end of `open-issues.md` (after the mimo round-24 section ending at line 2732).
+- Will append a compact entry to `.opencode/loop/review-log.md` and update `.opencode/loop/orchestration-state.md` with the round-24 m3 snapshot.
