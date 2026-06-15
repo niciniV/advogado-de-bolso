@@ -9,13 +9,13 @@
 - **Single FastAPI server** on port 8000 serves the API and (in prod) the React build.
 - **Dev**: Vite standalone on port 5173 with `server.proxy` forwarding `/api/*` → FastAPI.
 - **Prod**: `base_frontend/dist/` served via an explicit SPA fallback route (NOT `StaticFiles(html=True)`) on FastAPI. `/api/*` routes take precedence.
-- **Adapter pipeline**: Tools return typed Pydantic `BaseModel` envelopes for success, plain strings for error paths. The adapter reads `ToolReturnPart.content` directly. Pydantic AI stores the raw Python return on `BaseToolReturnPart.content` (typed as `ToolReturnContent`, an alias union in Pydantic AI 1.106+; the `Any` top-level permits typed objects). The `tool_plain` round-trip is NOT guaranteed to preserve raw objects through every model provider (e.g., Google Gemini may stringify) — the implementer MUST add a contract test in `tests/test_adapter.py` that mocks a `ToolReturnPart` with a `DeadlineResult` and asserts `isinstance(part.content, DeadlineResult)`. See ISSUE-006. Dispatch is by `tool_name` (not by type-tries), because `tool_kind` is `None` for user-defined tools (per the `ToolPartKind | None = None` annotation on `BaseToolReturnPart.tool_kind`).
-- **Case persistence**: One JSON file per case at `./storage/cases/{case_id}.json`. Disk is the source of truth. `case_id == session_id == one UUID`. No `_index.json` — `list_all()` scans the directory directly (acceptable for <1000 cases). Per-case `asyncio.Lock` with cleanup on delete.
+- **Adapter pipeline**: Tools return typed Pydantic `BaseModel` envelopes for success, plain strings for error paths. The adapter reads `ToolReturnPart.content` directly. Pydantic AI stores the raw Python return on `BaseToolReturnPart.content` (typed as `ToolReturnContent`, an alias union in Pydantic AI 1.106+; the `Any` top-level permits typed objects). The `tool_plain` round-trip is NOT guaranteed to preserve raw objects through every model provider (e.g., Google Gemini may stringify) — the implementer MUST add a contract test in `tests/test_adapter.py` that exercises the real Pydantic AI `tool_plain` execution path and asserts the resulting `ToolReturnPart.content` is a `DeadlineResult`. See ISSUE-006. Dispatch is by `tool_name` (not by type-tries), because `tool_kind` is `None` for user-defined tools (per the `ToolPartKind | None = None` annotation on `BaseToolReturnPart.tool_kind`).
+- **Case persistence**: One JSON file per case at `./storage/cases/{case_id}.json`. Disk is the source of truth. `case_id == session_id == one UUID`. No `_index.json` — `list_all()` scans the directory directly (acceptable for <1000 cases). Per-case `asyncio.Lock` instances are retained for the lifetime of the single-process service; they are **not** removed on delete because replacing a lock while waiters still hold the old instance can permit concurrent writes. API path parameters and request session IDs are UUID-typed before they reach the service/storage layer.
 - **`response_style` injection**: Pydantic AI's `@agent.instructions` decorator registers a callback that reads from a `ContextVar` set per `chat_structured` call. The agent is built **once** at startup; no per-request rebuild. `Deps` stays clean (no `response_style` field).
-- **Error envelope**: Reviewer-blocked responses return HTTP `422 Unprocessable Entity` with `{"blocked": true, "blocked_message": "..."}`. Frontend handles via the existing `!response.ok` branch.
+- **Error envelope**: Reviewer-blocked responses return HTTP `422 Unprocessable Entity` with the full `StructuredChatResponse` envelope. It includes `session_id`, the unchanged persisted `chat_history`, `blocked: true`, and `blocked_message`; structured fields derived from rejected prose/tool output are empty. The frontend handles it via the existing `!response.ok` branch and retains `session_id` for a retry.
 - **Auto-create UX**: First chat message with `session_id: null` creates a case server-side. The frontend sends `title` and `icon_name` derived from the first user message in the request body. `handleSaveCaseFromChat` becomes a metadata update (`PATCH /api/cases/{case_id}` with `UpdateCaseRequest { title?, icon_name?, response_style? }`) that refreshes title/icon (ISSUE-USR-005).
-- **Demo cases**: Three seed cases ship in `defaults.ts` marked `is_demo: true`. The frontend renders them with a "DEMO" badge and clears them when the first real case is created.
-- **CLI**: Stays on `agent.run_stream` + writes case files via the storage layer directly. Does not go through `ChatService`. Streaming UX preserved.
+- **Demo cases**: Three seed cases ship in `defaults.ts` marked `is_demo: true`. Demo IDs are intentionally non-UUID frontend-only IDs. Selecting, renaming, or deleting a demo is handled locally and MUST NOT call UUID-typed API routes. The frontend renders demos with a "DEMO" badge and clears them when the first real case is created.
+- **CLI**: Stays on `agent.run_stream` + writes case files via the storage layer directly. Does not go through `ChatService`, but MUST run `review_response()` before displaying or persisting the generated answer. The spinner/live status is preserved while generation and review run; token-by-token answer display is intentionally removed because showing tokens before review would violate the mandatory review gate.
 - **No Express, no Gemini direct calls.** `server.ts` deleted.
 
 ---
@@ -69,17 +69,21 @@ Wire types for the API. All fields snake_case.
 
 - `StructuredChatRequest { message, session_id: UUID | None, response_style?, title?, icon_name? }`
   - `session_id` MUST be a `UUID`-typed field (Pydantic auto-validates and rejects malformed values with a 422). The server never accepts an arbitrary string for `session_id` (ISSUE-USR-001). The first-message auto-create case (`session_id=None`) generates a fresh `uuid.uuid4()` server-side.
-  - `title` and `icon_name` are sent on the **first** message of a new case (when `session_id` is null). Server uses them to populate the case file. Subsequent messages ignore them.
+  - `title` and `icon_name` are sent on the **first** message of a new case (when `session_id` is null). Server uses them to populate the case file. Subsequent messages ignore them; persisted metadata changes only through `PATCH /api/cases/{case_id}`.
   - `response_style` is per-request; the `_current_style` ContextVar overrides the persisted case default for the current turn only. The case default is set on first creation and read back on subsequent turns when the request does not include a `response_style` (ISSUE-M3-007 + ISSUE-DS-009).
+  - ISSUE-REVIEW-007: first-message metadata MUST use the same validation contract as PATCH metadata so auto-create cannot persist values that PATCH would reject. Import `Annotated` from `typing` and `StringConstraints` from Pydantic, then define and reuse `CaseTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]`, `IconName = Literal["shopping_bag", "receipt_long", "local_shipping", "gavel"]`, and `ResponseStyle = Literal["simples", "detalhado", "firme"]`. Type `StructuredChatRequest.title` as `CaseTitle | None`, `icon_name` as `IconName | None`, and `response_style` as `ResponseStyle | None`. Keep `message` stripped and constrained to 1–8,000 characters. Invalid first-message metadata returns request-validation 422 before service/storage access.
 - `StructuredChatResponse { session_id, updated_at, chat_history, step_title, step_content, relevant_title, relevant_content, deadline, questions, suggestive_text, template_letter, quick_replies, blocked, blocked_message }`
-  - ISSUE-USR-015: `updated_at: datetime` and `chat_history: list[ChatMessage]` are added so the frontend mapper and the "server returns the full chat history" claim (line 1163 area) match the actual schema. The mapper (`mapStructuredResponse`, line 1059) derives `date` from `updated_at`; without the field, the mapper would have to call a separate `GET /api/cases/{id}` per response to compute the date, which would double the API surface area for what is a one-field lookup. The frontend `handleSelectCase` and `handleSendMessage` flows can now read `chat_history` directly from the chat response. The `chat_history` list mirrors the persisted `case.chat_history` at the time the response was built (i.e., includes the user and assistant messages just appended for this turn per line 661-681). `updated_at` is the server-side `case.updated_at` set at line 682. The `WireResponse` alias introduced in round 3 (ISSUE-002) is preserved: `WireResponse = StructuredChatResponse` and the `ChatResult.response: "schemas.StructuredChatResponse"` field still type-checks against the augmented schema.
+  - `updated_at` and `chat_history` MUST have assembly-safe defaults because `extract_structured_response()` constructs the response before the service has appended the current turn: `updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))` and `chat_history: list[ChatMessage] = Field(default_factory=list)`. `chat_structured` MUST overwrite both fields with the persisted case values before returning. This keeps adapter construction valid without weakening the outgoing API invariant.
+  - ISSUE-USR-015: `updated_at` and `chat_history` back the "server returns the full chat history" contract. On approved turns, `chat_history` includes the user and assistant messages just persisted. On blocked turns, it is the unchanged persisted history. The frontend maps the snake_case history explicitly; case-level display dates are derived separately from `updated_at`. The `ChatResult.response: "schemas.StructuredChatResponse"` field still type-checks against the augmented schema.
 - `CaseSummary { id, title, created_at, updated_at, last_message, icon_name, response_style, tag_text?, is_demo }`
   - `last_message` is the last assistant message's `step_content` (or `text`), truncated to 80 chars.
-  - `is_demo: bool` is true for the three seed cases. Frontend renders a "DEMO" badge for these.
-- `CaseResponse { id, title, chat_history: list[ChatMessage] }`
-- `ChatMessage` — Python mirror of the React `ChatMessage` in snake_case. `timestamp: int` (milliseconds since epoch — explicit, to avoid Pydantic auto-coercing to ISO string). All other fields are `Optional`.
+  - `is_demo: bool` is currently always `false` for server-returned cases. The three frontend seed cases set their own frontend-only `is_demo: true` marker and render a "DEMO" badge.
+- `CaseResponse { id, title, created_at, updated_at, icon_name, response_style, chat_history: list[ChatMessage] }`
+  - The additional metadata lets `apiClient.getCase()` fully map a selected case without merging stale list-state metadata.
+- `ChatMessage` — Python mirror of the React `ChatMessage` in snake_case. The core identity/content fields are required: `id: str`, `sender: Literal["user", "assistant"]`, `text: str`, and `timestamp: int` (milliseconds since epoch — explicit, to avoid Pydantic auto-coercing to ISO string). Only the assistant structured-display fields (`deadline`, `questions`, `step_title`, `step_content`, `relevant_title`, `relevant_content`, `suggestive_text`, `template_letter`, `quick_replies`) are optional.
 - `RenameCaseRequest { title }` — DEPRECATED. Replaced by `UpdateCaseRequest` (see below). Retained here only for historical reference; PATCH now uses `UpdateCaseRequest`.
 - `UpdateCaseRequest { title?, icon_name?, response_style? }` — the PATCH body for `PATCH /api/cases/{case_id}`. All fields are optional; at least one MUST be set (Pydantic `model_validator` enforces this with a 422 if none are provided). The `response_style` field accepts the same `Literal["simples", "detalhado", "firme"]` values as `StructuredChatRequest.response_style`. ISSUES-M3-008 + USR-005: the previous `RenameCaseRequest { title }` body could not carry `icon_name` or `response_style`, but the frontend needs to PATCH all three.
+  - Set `model_config = ConfigDict(extra="forbid")` so unknown fields produce 422 instead of being silently ignored. Reuse `CaseTitle`, `IconName`, and `ResponseStyle`; do not duplicate or weaken the validation applied by `StructuredChatRequest`.
 
 ### `src/advogado_de_bolso/adapter.py`
 Pure transformation function. Dispatch by `tool_name` to avoid type-tries on user tools (`tool_kind = None`).
@@ -176,10 +180,13 @@ _QUESTION_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     # "1. The customer should..." were mis-extracted as questions.
     re.compile(r"^\s*\d+\.\s+(.+\?)\s*$", re.MULTILINE),          # "1. ...?"
     re.compile(r"^\s*[-*]\s+(.+?\?)", re.MULTILINE),            # "- ...?"
-    # ISSUE-USR-010: pattern 3 has a SINGLE capture group wrapping the
-    # full question (keyword + body + "?"), so `match.group(1)` returns
-    # the entire "Posso cancelar a compra?" instead of just "Posso".
-    re.compile(r"\b(Posso|Poderia|Pode|Consegue|Você poderia)[^\n?]*\?", re.IGNORECASE),
+    # ISSUE-USR-010 + review fix: the outer capture group wraps the FULL
+    # question and the keyword alternatives are non-capturing, so
+    # `match.group(1)` returns "Posso cancelar a compra?", not "Posso".
+    re.compile(
+        r"\b((?:Posso|Poderia|Pode|Consegue|Você poderia)[^\n?]*\?)",
+        re.IGNORECASE,
+    ),
 )
 _DEFAULT_QUICK_REPLIES: Final[list[str]] = [
     "Explique melhor",
@@ -269,10 +276,11 @@ Per-case JSON persistence. **No `_index.json`**: `list_all()` scans the director
   - `model_history` is the LLM-bound history (raw `ModelMessage` objects appended from `result.new_messages()` on each turn) and is **required** for multi-turn quality (ISSUE-M3-001 + ISSUE-USR-002). It preserves `ToolCallPart`/`ToolReturnPart` payloads across turns. The wire `chat_history` is for the UI; `model_history` is for the LLM. Critically, persistence uses `result.new_messages()` (current turn only) — not `result.all_messages()` — so prior turns' tool returns are not double-counted.
 - Functions: `load(case_id, *, cases_path: Path)`, `save(case, *, cases_path: Path)`, `delete(case_id, *, cases_path: Path)`, `list_all(*, cases_path: Path) -> list[CaseSummary]`. **All four functions take a `cases_path: Path` keyword-only argument** (ISSUE-USR-007); the `ChatService` passes `self._cases_path` (which it received from `Settings.cases_path`) on every call. The functions MUST NOT hardcode `./storage/cases` — doing so would defeat the `CASES_PATH` env var.
 - File layout: `./storage/cases/{case_id}.json` (configurable via `Settings.cases_path` with env alias `CASES_PATH` — see ISSUE-M3-014 + ISSUE-USR-007)
-- **Path containment** (ISSUE-USR-001): every storage function (`load`, `save`, `delete`) takes a `case_id` and constructs `cases_path / f"{case_id}.json"`. After construction, the resolved absolute path MUST satisfy `file_path.resolve().is_relative_to(cases_path.resolve())`; otherwise the function raises `ValueError`. Combined with the `UUID` typing of `StructuredChatRequest.session_id` (see `schemas.py`), this prevents path-traversal inputs like `../../etc/passwd` from escaping `cases_path`. The `case_id` value MUST be either a freshly-generated `uuid.uuid4()` (server-side) or a Pydantic-validated `UUID` (client-supplied).
+- **Path containment and UUID invariant** (ISSUE-USR-001): every storage function (`load`, `save`, `delete`) takes a canonical UUID string and constructs `cases_path / f"{case_id}.json"`. After construction, the resolved absolute path MUST satisfy `file_path.resolve().is_relative_to(cases_path.resolve())`; otherwise the function raises `ValueError`. `StructuredChatRequest.session_id` and every `/api/cases/{case_id}` path parameter are typed as `UUID`; service entry points accept `UUID` and convert once with `str(case_id)` before lock/storage access. The only non-client ID source is a freshly-generated `uuid.uuid4()`.
 - **Directory creation**: `save()` calls `file_path.parent.mkdir(parents=True, exist_ok=True)` before writing. The `cases_path` is also created at `ChatService.__init__` time so the first save is a no-op directory-wise. See ISSUE-005.
-- Atomic writes: write to `{case_id}.json.tmp` then `os.replace()` (per Open Issue #U; `Path.replace` and `os.replace` are the same on Python 3, but be explicit).
-- Per-case `asyncio.Lock` with cleanup on delete (per Open Issue #10 = A). The lock registry uses a single meta-lock to protect the dict itself.
+- Atomic writes: write to a unique same-directory temp path such as `.{case_id}.{uuid4().hex}.tmp`, flush and close it, then call `os.replace(tmp, final)`. Clean up that specific temp path in `finally`. Unique temp names prevent concurrent writers from clobbering each other's temporary file.
+- Atomic replacement prevents torn/partially-written JSON, but it does **not** prevent cross-process lost updates. Concurrent API + CLI read-modify-write operations on the same case are explicitly unsupported and use last-writer-wins semantics. Do not describe `os.replace()` as full cross-process write safety.
+- Per-case `asyncio.Lock` retained for the service lifetime. The lock registry uses a single meta-lock to protect creation/lookups. Do **not** pop a lock on delete: a waiter may already hold a reference to the old lock, and creating a replacement lock would break serialization. The bounded `<1000`-case deployment assumption makes retaining at most one lightweight lock per observed UUID acceptable.
 - `list_all()` reads each `{case_id}.json` and returns a `CaseSummary` for each. For <1000 cases this is fast enough; no index file is needed.
 - **Scalability constraint** (ISSUE-DS-007): the `list_all()` docstring MUST document that this implementation is acceptable only for `<1000` case files. Each call performs one `json.loads` per file plus one `os.listdir`. Above 1000 cases, latency degrades linearly. A soft warning is logged at `INFO` level when the file count exceeds 500. See Out-of-Scope Notes for the upgrade path.
 
@@ -390,12 +398,12 @@ Major rewrite. `ChatService.chat_structured` is the new primary method. No `_max
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 import uuid
+from collections.abc import Callable
 from contextlib import suppress
-from contextvars import ContextVar, Token
-from dataclasses import dataclass, field
+from contextvars import Token
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -405,16 +413,13 @@ from typing import Any, Literal, Protocol
 # malformed UUIDs with 422 at the API layer.
 from uuid import UUID
 
+from pydantic_ai import Agent, AgentRunResult
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
-    ModelResponse,
-    ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
-    TextPart,
 )
-from pydantic_ai import AgentRunResult
 # ISSUE-USR-011: `AgentRunResult` is re-exported from the top-level
 # `pydantic_ai` package (and also from `pydantic_ai.run`). The previous
 # import path `from pydantic_ai.tools import AgentRunResult` raises
@@ -424,12 +429,12 @@ from pydantic_ai import AgentRunResult
 # root, so we import from there to stay forward-compatible.
 
 from . import schemas
-from .contracts import DeadlineResult
-from .schemas import (
-    CaseSummary,
-    ChatMessage,
-    StructuredChatResponse,
-)
+from .adapter import extract_structured_response
+# `_current_style` carries the request-local response style read by agent instructions.
+from .agent import _current_style
+from .deps import Deps
+from .schemas import CaseSummary, ChatMessage
+from .storage import cases
 # ISSUE-USR-006: `Case` is the persistent storage model defined in
 # `storage/cases.py` (see plan line 259), NOT in `schemas.py` (which only
 # defines the wire types `CaseResponse`, `CaseSummary`, `ChatMessage`,
@@ -438,22 +443,7 @@ from .schemas import (
 # `ImportError: cannot import name 'Case' from 'advogado_de_bolso.schemas'`
 # at import time. Import from the storage module instead.
 from .storage.cases import Case
-from .storage import cases
-from .adapter import extract_structured_response
 from .tools.revisor import RevisionResult
-# ISSUE-USR-012: `_current_style` is the `ContextVar[str | None]` defined
-# in `agent.py` (see plan line 302) that carries the per-request
-# `response_style` override. The `@agent.instructions` callback reads
-# `_current_style.get()` to decide which `STYLE_PROMPTS` entry to inject
-# into the system prompt. `chat_structured` (lines 614 and 720 below)
-# calls `_current_style.set(effective_style)` and
-# `_current_style.reset(style_token)` on the local `Token`, but without
-# this import the service would hit `NameError: name '_current_style' is
-# not defined` on every `chat_structured` call. Import the symbol from
-# `.agent` (where it is defined) to wire the per-request override.
-from .agent import _current_style  # noqa: E402  (USR-012)
-
-logger = logging.getLogger(__name__)
 
 # ISSUE-IND-001: `REVIEW_BLOCKED_MESSAGE` is defined locally in `service.py`
 # rather than imported from `.tools.revisor`. The constant is tightly coupled
@@ -555,21 +545,6 @@ class ChatService:
                 self._case_locks[case_id] = lock
             return lock
 
-    async def _release_case_lock(self, case_id: str) -> None:
-        """Release the per-case lock.
-
-        ISSUE-M3-006 (lock-cleanup race): we only pop the lock from the
-        registry AFTER the file delete succeeds, and `delete_case` itself
-        acquires the per-case lock before deleting, so a concurrent
-        `chat_structured` either runs strictly before the delete or strictly
-        after. The window where the lock could leak is reduced to a
-        never-observed single-task race. The in-flight `chat_structured`
-        keeps its reference to the OLD lock via the local `lock` variable
-        and is not affected by registry eviction.
-        """
-        async with self._locks_meta_lock:
-            self._case_locks.pop(case_id, None)
-
     async def chat_structured(
         self,
         message: str,
@@ -586,11 +561,9 @@ class ChatService:
         case_id = str(session_id) if session_id is not None else str(uuid.uuid4())
         lock = await self._get_case_lock(case_id)
         async with lock:
-            # Load (or create) the case. Track whether this turn created a
-            # brand-new case — used by ISSUE-USR-004 to avoid persisting
-            # an orphan file when the reviewer blocks the first message.
+            # Load or create the in-memory case. A blocked turn returns before
+            # any mutation/save, so a blocked first message creates no file.
             case = cases.load(case_id, cases_path=self._cases_path)
-            was_new_case = case is None
             if case is None:
                 case = Case(
                     id=case_id,
@@ -613,12 +586,9 @@ class ChatService:
                     # across turns.
                     model_history=[],
                 )
-            elif title or icon_name:
-                # First-message update of metadata
-                if title:
-                    case.title = title
-                if icon_name:
-                    case.icon_name = icon_name
+            # Existing cases intentionally ignore title/icon_name supplied
+            # with chat requests. Metadata changes only through
+            # PATCH /api/cases/{case_id}.
 
             # ISSUE-DS-009: set the `_current_style` ContextVar AFTER the
             # case is loaded so that on subsequent turns (where
@@ -657,17 +627,26 @@ class ChatService:
                 revision = await self._reviewer(message, prose)
                 blocked = not revision.approved_as_is
                 blocked_message = REVIEW_BLOCKED_MESSAGE if blocked else None
-                if blocked:
-                    prose = blocked_message or ""
 
-                # Extract structured data — inspect ONLY the current turn's
-                # tool returns (new_messages). Prior turns' returns live in
+                # A blocked turn is not part of either persisted history.
+                # Do not expose rejected prose/tool outputs, and do not append
+                # rejected new_messages to model_history. Return the existing
+                # persisted chat snapshot plus the safe blocked message only.
+                if blocked:
+                    structured = extract_structured_response(
+                        blocked_message or "", [],
+                        blocked=True, blocked_message=blocked_message,
+                    )
+                    structured.session_id = case_id
+                    structured.chat_history = list(case.chat_history)
+                    structured.updated_at = case.updated_at
+                    return ChatResult(session_id=case_id, response=structured)
+
+                # Extract structured data — inspect ONLY the approved current
+                # turn's tool returns. Prior turns' returns live in
                 # case.model_history and are NOT re-examined (ISSUE-USR-002).
                 tool_returns = _collect_tool_returns(new_messages)
-                structured = extract_structured_response(
-                    prose, tool_returns,
-                    blocked=blocked, blocked_message=blocked_message,
-                )
+                structured = extract_structured_response(prose, tool_returns)
                 structured.session_id = case_id
 
                 # Append user + assistant messages to chat_history.
@@ -705,48 +684,17 @@ class ChatService:
                 # turns' messages (ISSUE-USR-002).
                 case.model_history = case.model_history + new_messages
 
-                # ISSUE-USR-015: populate the new schema fields on the
-                # outgoing `StructuredChatResponse` so the frontend mapper
-                # (`mapStructuredResponse`, line 1059) and the "server
-                # returns the full chat history" claim (line 1163 area) have
-                # the data they reference. `chat_history` is a defensive
-                # shallow copy of the persisted history (the in-memory
-                # `case.chat_history` is the source of truth). `updated_at`
-                # is the timestamp we just set above; serializing via
-                # `model_dump(mode="json")` would be done by the API layer's
-                # Pydantic response model, so we leave the `datetime` here
-                # and trust the FastAPI encoder (see also ISSUE-USR-008 for
-                # the explicit `mode="json"` call site on the 422 path).
+                # Overwrite the response model's assembly-safe defaults with
+                # the actual persisted case snapshot. `chat_history` is a
+                # defensive shallow copy; FastAPI serializes `updated_at`.
                 structured.chat_history = list(case.chat_history)
                 structured.updated_at = case.updated_at
 
-                # ISSUE-USR-004: do NOT persist a brand-new case that the
-                # reviewer blocked. The previous plan saved the case
-                # unconditionally, which orphaned `{case_id}.json` files on
-                # disk when the frontend's `!response.ok` branch surfaced
-                # only the `blocked_message` and did not capture the
-                # `session_id` for retry. Now: if the reviewer blocked AND
-                # the case was just created in this call (`was_new_case`),
-                # skip `cases.save(case)` and return the 422 envelope with
-                # `session_id` populated so the frontend can retry against
-                # the same case ID (no orphaned file on disk). The 422
-                # response body still includes the assistant message and
-                # `blocked_message` for the user to read.
-                if blocked and was_new_case:
-                    logger.info(
-                        "chat_structured: reviewer blocked new case case_id=%s; "
-                        "skipping save to avoid orphan",
-                        case_id,
-                    )
-                else:
-                    # ISSUE-M3-015: error contract — `cases.save` is called
-                    # BEFORE the response is built. If save fails, an exception
-                    # propagates to the API layer (which converts to 503).
-                    # We do not silently swallow backend or save errors here.
-                    # ISSUE-USR-007: pass `cases_path=self._cases_path` so the
-                    # `CASES_PATH` env var actually controls the persistence
-                    # location.
-                    cases.save(case, cases_path=self._cases_path)
+                # Only approved turns reach this point. `cases.save` is called
+                # before returning; save failures propagate to the API layer,
+                # which converts them to 503. Blocked turns returned above
+                # without mutating chat_history or model_history.
+                cases.save(case, cases_path=self._cases_path)
 
                 return ChatResult(session_id=case_id, response=structured)
             finally:
@@ -757,9 +705,9 @@ class ChatService:
         # storage layer.
         return cases.list_all(cases_path=self._cases_path)
 
-    async def get_case(self, case_id: str) -> Case | None:
+    async def get_case(self, case_id: UUID) -> Case | None:
         # ISSUE-USR-007: thread cases_path through to `cases.load`.
-        return cases.load(case_id, cases_path=self._cases_path)
+        return cases.load(str(case_id), cases_path=self._cases_path)
 
     # ISSUE-IND-002: a dedicated `rename_case` method was removed. The old
     # `PATCH /api/cases/{case_id}` wiring (USR-005) already delegates to
@@ -772,7 +720,7 @@ class ChatService:
     # between the two call paths the frontend could take.
 
     async def update_case_meta(
-        self, case_id: str, **fields: Any
+        self, case_id: UUID, **fields: Any
     ) -> Case:
         """ISSUE-M3-008: wire this into `PATCH /api/cases/{case_id}` (USR-005).
 
@@ -793,45 +741,67 @@ class ChatService:
         (one lock per state-modifying case operation) is preserved by
         mirroring `delete_case`'s pattern at line 768: acquire the lock,
         do the load/validate/save, and release implicitly via the
-        `async with` exit. We do NOT call `self._release_case_lock`
-        after the `async with` block: the lock is reference-counted by
-        the active calls (per ISSUE-M3-006), and any in-flight
-        `chat_structured` on the same `case_id` keeps the lock alive
-        until it returns. A subsequent `delete_case` will pop the lock
-        after the file delete (per the M3-006 invariant).
+        `async with` exit. The lock object remains in the registry for the
+        service lifetime so every future operation for this UUID continues
+        to serialize on the same object.
         """
         # ISSUE-USR-013: acquire the per-case lock to serialize metadata
         # updates with concurrent `chat_structured` and `delete_case` on
         # the same case_id. The same `asyncio.Lock` instance is reused
         # for all state-modifying operations on this case.
-        lock = await self._get_case_lock(case_id)
+        case_key = str(case_id)
+        lock = await self._get_case_lock(case_key)
         async with lock:
-            case = cases.load(case_id, cases_path=self._cases_path)
+            case = cases.load(case_key, cases_path=self._cases_path)
             if case is None:
-                raise KeyError(case_id)
-            # ... validate fields, apply, save ...
-            # Per-field validation (non-empty `title`, `response_style`
-            # in the allowed literal set, `icon_name` in the allowed
-            # union) is performed here before mutating `case`.
+                raise KeyError(case_key)
+
+            allowed_fields = {"title", "icon_name", "response_style"}
+            unknown = set(fields) - allowed_fields
+            if unknown:
+                raise ValueError(f"Unknown case metadata fields: {sorted(unknown)}")
+            if not fields:
+                raise ValueError("At least one metadata field is required.")
+
+            title = fields.get("title")
+            if title is not None:
+                title = str(title).strip()
+                if not title or len(title) > 120:
+                    raise ValueError("title must contain 1 to 120 characters.")
+
+            icon_name = fields.get("icon_name")
+            allowed_icons = {"shopping_bag", "receipt_long", "local_shipping", "gavel"}
+            if icon_name is not None and icon_name not in allowed_icons:
+                raise ValueError(f"icon_name must be one of {sorted(allowed_icons)}")
+
+            response_style = fields.get("response_style")
+            allowed_styles = {"simples", "detalhado", "firme"}
+            if response_style is not None and response_style not in allowed_styles:
+                raise ValueError(f"response_style must be one of {sorted(allowed_styles)}")
+
+            # Validate the complete patch before mutating the loaded case.
+            if title is not None:
+                case.title = title
+            if icon_name is not None:
+                case.icon_name = icon_name
+            if response_style is not None:
+                case.response_style = response_style
             case.updated_at = _now()
             cases.save(case, cases_path=self._cases_path)
         return case
 
-    async def delete_case(self, case_id: str) -> bool:
-        # ISSUE-M3-006: acquire the per-case lock for the delete so a
-        # concurrent `chat_structured` either runs strictly before or
-        # strictly after the delete. (The in-flight call, if any, holds a
-        # separate reference to the OLD lock and is not interrupted.)
-        lock = await self._get_case_lock(case_id)
+    async def delete_case(self, case_id: UUID) -> bool:
+        # Acquire the retained per-case lock for delete. Do not remove the
+        # lock afterward: waiters may already reference it, and replacing it
+        # would permit two operations for the same UUID to run concurrently.
+        case_key = str(case_id)
+        lock = await self._get_case_lock(case_key)
         async with lock:
-            deleted = cases.delete(case_id, cases_path=self._cases_path)
-        if deleted:
-            await self._release_case_lock(case_id)
-        return deleted
+            return cases.delete(case_key, cases_path=self._cases_path)
 
-    async def get_history(self, case_id: str) -> list[ChatMessage]:
+    async def get_history(self, case_id: UUID) -> list[ChatMessage]:
         # ISSUE-USR-007: thread cases_path through to `cases.load`.
-        case = cases.load(case_id, cases_path=self._cases_path)
+        case = cases.load(str(case_id), cases_path=self._cases_path)
         return case.chat_history if case is not None else []
 
 
@@ -928,7 +898,11 @@ The `_backend` protocol stays as a simple `run(message, history) -> (prose, hist
 class AgentChatBackend:
     """Implements `ChatBackend`. Does NOT run the reviewer — the service does."""
 
-    def __init__(self, agent, deps_factory):
+    def __init__(
+        self,
+        agent: Agent[Deps, str],
+        deps_factory: Callable[[], Deps],
+    ) -> None:
         self._agent = agent
         self._deps_factory = deps_factory
 
@@ -936,7 +910,7 @@ class AgentChatBackend:
         self, message: str, history: list[ModelMessage]
     ) -> tuple[str, list[ModelMessage]]:
         deps = self._deps_factory()
-        result: AgentRunResult = await self._agent.run(
+        result: AgentRunResult[str] = await self._agent.run(
             message, deps=deps, message_history=history
         )
         prose = result.output  # the final assistant text
@@ -948,18 +922,22 @@ class AgentChatBackend:
         return prose, new_messages
 ```
 
+ISSUE-REVIEW-008: the service example above is the lint/type-checking contract, not illustrative pseudocode. Keep only imports used by the final implementation, type every function parameter under strict mypy, and parameterize `AgentRunResult[str]`. The service/API batch gate MUST run both `uv run ruff check src/ tests/` and `uv run mypy src/` before proceeding, rather than deferring these failures to the final gate.
+
 `build_chat_service(settings, deps_factory)` wires everything: `AgentChatBackend` + `ReviewerLike` (built from `tools.revisor.review_response`) + `ChatService`. **The `ChatService` constructor receives `cases_path=settings.cases_path`** (ISSUE-USR-007) so the `CASES_PATH` env var actually controls persistence. Without this injection, the env var would be silently ignored (the previous spec hardcoded `Path("./storage/cases")` inside `ChatService.__init__`).
 
 ### `src/advogado_de_bolso/api.py`
 Major rewrite. Drop `/api/chat` and `/api/sessions`. Add the new case endpoints. Use **explicit SPA fallback** (not `StaticFiles(html=True)`). Return `422` for blocked responses.
 
 **Endpoints:**
-- `POST /api/chat/structured` (body: `StructuredChatRequest`) → `StructuredChatResponse` (200) **or** `{"blocked": true, "blocked_message": "..."}` (422) on reviewer block.
+- `POST /api/chat/structured` (body: `StructuredChatRequest`) → full `StructuredChatResponse` on both success (200) and reviewer block (422). The blocked envelope includes `session_id`, unchanged persisted `chat_history`, `blocked=true`, and `blocked_message`; it never includes rejected prose/tool-derived structured data.
 - `GET /api/cases` → `list[CaseSummary]`
-- `GET /api/cases/{case_id}` → `CaseResponse` (added per ISSUE-USR-005 — required by tests and the frontend `handleSelectCase` flow, which was previously undocumented in the endpoint list). Delegates to `ChatService.get_case(case_id)`.
-- `PATCH /api/cases/{case_id}` (body: `UpdateCaseRequest`) → `CaseResponse`. Delegates to `ChatService.update_case_meta` (ISSUE-M3-008 + ISSUE-USR-005) so per-field validation lives in the service. The body uses `UpdateCaseRequest { title?, icon_name?, response_style? }`, not the old `RenameCaseRequest { title }`. **This endpoint also serves the rename flow** (ISSUE-IND-002): the frontend's `apiClient.renameCase(caseId, newTitle)` is a thin client-side wrapper that calls `apiClient.updateCaseMeta(caseId, { title: newTitle })`, which issues a PATCH with `{ title }` to this same endpoint. There is no dedicated `rename_case` method on `ChatService`; the PATCH endpoint is the single metadata-update surface.
-- `DELETE /api/cases/{case_id}` → 204
-- `GET /api/cases/{case_id}/history` → `list[ChatMessage]`
+- `GET /api/cases/{case_id}` with `case_id: UUID` → `CaseResponse` (added per ISSUE-USR-005 — required by tests and the frontend `handleSelectCase` flow, which was previously undocumented in the endpoint list). Delegates to `ChatService.get_case(case_id)`.
+- `PATCH /api/cases/{case_id}` with `case_id: UUID` (body: `UpdateCaseRequest`) → `CaseResponse`. Delegates to `ChatService.update_case_meta` (ISSUE-M3-008 + ISSUE-USR-005) so per-field validation lives in the service. The body uses `UpdateCaseRequest { title?, icon_name?, response_style? }`, not the old `RenameCaseRequest { title }`. **This endpoint also serves the rename flow** (ISSUE-IND-002): the frontend's `apiClient.renameCase(caseId, newTitle)` is a thin client-side wrapper that calls `apiClient.updateCaseMeta(caseId, { title: newTitle })`, which issues a PATCH with `{ title }` to this same endpoint. There is no dedicated `rename_case` method on `ChatService`; the PATCH endpoint is the single metadata-update surface.
+  - Call `payload.model_dump(exclude_unset=True)` when forwarding fields. Convert `KeyError` from a missing case to HTTP 404 and `ValueError` from service validation to HTTP 422; do not let either become the generic 503 handler.
+- `DELETE /api/cases/{case_id}` with `case_id: UUID` → 204
+- `GET /api/cases/{case_id}/history` with `case_id: UUID` → `list[ChatMessage]`
+- Every case path parameter is UUID-typed in the FastAPI function signature. Malformed IDs return FastAPI/Pydantic `422` before service or storage access.
 - `GET /api/health` (kept)
 
 **Dropped endpoints:** `POST /api/chat`, `DELETE /api/sessions/{session_id}`, `POST /api/cases` (per Open Issue #5 = A), `PUT /api/cases/{case_id}` (per Open Issue #14 = A).
@@ -1018,15 +996,17 @@ return result.response
 The API layer wraps `chat_structured` calls in a `try/except` and converts unhandled backend / save exceptions to `503 Service Unavailable` (ISSUE-M3-015). The frontend MUST parse the body on `!response.ok` to surface `blocked_message` to the user (ISSUE-DS-002).
 
 ### `src/advogado_de_bolso/cli.py`
-Stays on `agent.run_stream` (per Open Issue #1 = A). Writes case files via the storage layer directly.
+Stays on `agent.run_stream` (per Open Issue #1 = A), but generation is buffered behind the mandatory reviewer gate. Writes approved case files via the storage layer directly.
 
 - Build the agent once via `build_agent(settings)`.
 - Build a `KnowledgeIndex` and `Deps` as today.
 - Use a per-CLI-session `model_history: list[ModelMessage]` (in-memory).
-- After each turn, save the case file to `./storage/cases/{session_id}.json` — **the same path the API uses** (ISSUE-010) so CLI conversations are visible from the UI and vice versa.
+- Accumulate streamed tokens internally while the Live UI shows only a spinner/status. After generation completes, call `review_response(question=user_input, response=accumulated, ...)`.
+- If review blocks, display only `REVIEW_BLOCKED_MESSAGE`; do not display the generated prose, append its `new_messages`, or save the turn.
+- If review approves, render the complete answer, append the approved turn's `result.new_messages()` to `model_history` plus the UI messages to `chat_history`, and save the case file to `./storage/cases/{session_id}.json`.
 - The CLI constructs a `Case` object with both `chat_history` and `model_history` populated, then calls `cases.save(case, cases_path=settings.cases_path)` (ISSUE-DS-010 + ISSUE-USR-007). Saving only `chat_history` would leave `model_history == []` on disk, and a subsequent API turn on the same case would lose tool-call/return context (per ISSUE-M3-001). The persistence path is shared with the API, so the saved shape must match. The CLI reads `settings.cases_path` (env `CASES_PATH`) so the env var works for both transports.
-- Streaming UX preserved (the Live spinner / token-by-token rendering at `cli.py:124-156`).
-- **CLI write safety** (ISSUE-USR-013): the CLI writes to the same case files as the API. Because the CLI runs in a separate process, it cannot share the service's in-process `asyncio.Lock` registry — the API's per-case lock does not protect against a concurrent CLI write. To avoid a torn or partially-written JSON, the storage layer's `cases.save` MUST use an **atomic POSIX rename**: write the new JSON to `{case_id}.json.tmp` in the same directory, then call `os.replace(tmp, final)`. `os.replace` is atomic on POSIX (Linux/macOS) and on Windows when the destination is on the same filesystem (the cases directory is created once at startup, so all writes stay in the same directory). The API service is the primary user of the in-process lock for in-service concurrency; the CLI is a secondary writer that relies on the storage layer's atomic rename for cross-process safety. The `cases.save` spec at line 263 must include this atomic-rename contract.
+- Spinner/live-status UX is preserved; token-by-token answer display is removed because it would expose content before mandatory review.
+- **CLI/API concurrent write limitation**: the storage layer uses a unique same-directory temp file plus `os.replace`, preventing torn JSON and temp-file collisions. It does not serialize cross-process read-modify-write transactions. Concurrent API and CLI edits to the same case are unsupported and last-writer-wins; document this in README and the Out-of-Scope Notes.
 
 ### `src/advogado_de_bolso/config.py`
 Add `cases_path: Path = Field(default=Path("./storage/cases"), alias="CASES_PATH")` (ISSUE-M3-014). The env alias keeps `Settings` consistent with `DATA_PATH` / `CHROMA_PATH` / `HF_HOME` which all use `Field(..., alias=...)`.
@@ -1044,6 +1024,7 @@ Golden tests covering:
 - search_knowledge_base returning a `tuple` (Sequence) → accepted (ISSUE-M3-010).
 - `calcular_prazo_consumidor` returning a **string** (error path) → `structured.deadline is None`, no crash.
 - Reviewer-blocked case → `structured.blocked is True`, `structured.blocked_message` is set.
+- Constructing `StructuredChatResponse` inside the adapter succeeds before service enrichment because `updated_at` and `chat_history` have assembly-safe defaults; service tests assert those placeholders are overwritten before API return.
 - `prose` containing "Posso..." questions → `questions` is non-empty.
 - **`prose` with "Posso cancelar a compra?"** (ISSUE-USR-010): assert the extracted question is `"Posso cancelar a compra?"` (or the rstrip'd form `"Posso cancelar a compra"` with the trailing `?` re-appended by the helper), NOT `"Posso"`. Pins the regex fix.
 - **`prose` with "1. The customer should..."** (ISSUE-USR-010): assert the numbered list item is NOT extracted as a question (the new pattern requires the item to end in "?"). Pins the regex fix for non-question numbered items.
@@ -1058,8 +1039,8 @@ Golden tests covering:
    5. Note: even with the real round-trip, JSON serialize/deserialize (`all_messages_json` → `ModelMessagesTypeAdapter.validate_python`) will produce a plain `dict` from the typed object on reload — the test therefore only pins the **in-memory** behavior, not persistence. A separate test pins the persistence shape (the `ModelMessage` structure with `ToolCallPart` + `ToolReturnPart` survives the storage layer round-trip, but the `ToolReturnPart.content` is loaded as a `dict`, NOT as a `DeadlineResult`).
 
 ### `tests/test_storage.py` (new)
-- Atomic write (write to `.tmp`, replace).
-- `delete_case` removes the file and the lock.
+- Atomic write uses a unique same-directory `.tmp` path and `os.replace`; two concurrent saves never share a temp filename or produce malformed JSON.
+- `delete_case` removes the file. Lock-registry behavior is tested at the service layer.
 - `list_all` returns the right summaries.
 - Missing file → `load` returns `None`, not raise.
 
@@ -1085,19 +1066,24 @@ All string-content assertions become field assertions:
 - Drop tests for `/api/chat`, `/api/sessions/{id}`, `/assets/*`.
 - Add tests for `/api/chat/structured` (200 success, 422 blocked, 422 validation error).
 - Add tests for `GET /api/cases`, `GET /api/cases/{id}`, `PATCH /api/cases/{id}`, `DELETE /api/cases/{id}`, `GET /api/cases/{id}/history`.
+- For every `/api/cases/{case_id}` endpoint, assert a malformed non-UUID path parameter returns 422 before the service is called.
 - Add a test for the SPA fallback (`GET /` returns index.html, `GET /api/typo` returns 404).
 - **PATCH body test** (ISSUE-USR-005): assert that `PATCH /api/cases/{id}` with `UpdateCaseRequest { title: "X" }`, `{ icon_name: "shopping_bag" }`, `{ response_style: "simples" }`, and any combination thereof, all succeed; assert that an empty body `{ }` returns 422 (the `model_validator` rejects "no fields set"); assert that an unknown field returns 422.
+- **First-message metadata validation test** (ISSUE-REVIEW-007): assert `POST /api/chat/structured` rejects blank/over-120-character `title`, unknown `icon_name`, invalid `response_style`, blank `message`, and messages over 8,000 characters with 422 before the service is called. Assert valid auto-create metadata reaches the service stripped and unchanged.
 - **GET single-case test** (ISSUE-USR-005): assert `GET /api/cases/{id}` returns a `CaseResponse` for an existing case and 404 for a missing case.
-- **Blocked-first-message test** (ISSUE-USR-004): assert that a blocked first message returns 422, the response body includes `session_id` and `blocked_message`, and NO `{session_id}.json` file is created on disk (the service skips `cases.save` for blocked new cases).
+- Assert `CaseResponse` contains `created_at`, `updated_at`, `icon_name`, `response_style`, and mapped `chat_history`, matching what `mapCaseResponse` requires.
+- Assert chat requests carrying `title` or `icon_name` for an existing UUID do not change persisted metadata; only PATCH may change those fields.
+- **Blocked-first-message test** (ISSUE-USR-004): assert that a blocked first message returns the full `StructuredChatResponse` envelope with status 422, `session_id`, `blocked=true`, `blocked_message`, and empty/unchanged history; assert NO `{session_id}.json` file is created on disk (the service skips `cases.save` for blocked new cases).
 
 ### `tests/test_service.py` (rewrite)
 - `ChatService` no longer has `chat`, `clear_session`, `session_history`, `session_count`, `_max_sessions`, `_evict_old_sessions`.
-- New tests: `chat_structured` with new session creates a case file; second message appends; per-case lock serializes concurrent calls; reviewer-blocked returns blocked; `delete_case` cleans up the lock.
+- New tests: `chat_structured` with new session creates a case file; second message appends; per-case lock serializes concurrent calls; reviewer-blocked returns blocked; `delete_case` removes the case file while retaining the same lock object.
+- **Blocked existing-case test**: after one approved persisted turn, block the next turn and assert neither `chat_history` nor `model_history` changes on disk; the rejected prose/tool returns are absent from the 422 response and the next backend history.
 - Test the `ContextVar` reset: after `chat_structured(style="simples")`, the style is reset (no leakage between requests).
 - **`model_history` persistence** (ISSUE-M3-001): after a turn that included a `ToolCallPart`/`ToolReturnPart`, the case file on disk contains the full `ModelMessage` list with the tool parts. A subsequent `chat_structured` call passes that list back to the backend. Assert via inspecting `case.model_history` after the first call, then mock the second call to capture the `history` argument and assert it matches.
-- **`model_history` JSON-roundtrip shape** (ISSUE-USR-016): the persistence test for the tool return MUST NOT require `isinstance(content, DeadlineResult)` after a JSON load. The plan's `test_adapter.py` spec at line 995 acknowledges that JSON serialize/deserialize produces a plain `dict` from the typed object on reload. The relaxed assertion is: after `cases.save(case)` followed by `cases.load(case_id)`, the reloaded `case.model_history` contains a `ModelRequest` whose last part is a `ToolReturnPart` whose `content` is a `dict` (NOT a `DeadlineResult`) with the same field values as the original (`data_inicio`, `data_limite`, `dias`, `tipo_prazo`, `base_legal`, `fundamento`). This pins the persistence structure without making an impossible typed-identity claim. The in-memory `tool_plain` round-trip test (line 995) continues to assert `isinstance(content, DeadlineResult)` because that test does not round-trip through JSON.
+- **`model_history` JSON-roundtrip shape** (ISSUE-USR-016): the persistence test for the tool return MUST NOT require `isinstance(content, DeadlineResult)` after a JSON load. The plan's `test_adapter.py` spec acknowledges that JSON serialize/deserialize produces a plain `dict` from the typed object on reload. The relaxed assertion is: after `cases.save(case)` followed by `cases.load(case_id)`, the reloaded `case.model_history` contains a `ModelRequest` whose last part is a `ToolReturnPart` whose `content` is a `dict` (NOT a `DeadlineResult`) with the same field values as the original (`data_inicio`, `data_limite`, `dias`, `tipo_prazo`, `base_legal`, `item_label`, `vicio_oculto`, `nota`). This pins the persistence structure without making an impossible typed-identity claim. The in-memory `tool_plain` round-trip test continues to assert `isinstance(content, DeadlineResult)` because that test does not round-trip through JSON.
 - **`update_case_meta` wiring** (ISSUE-M3-008): the PATCH endpoint calls `update_case_meta(case_id, title="...")`, and the case on disk reflects the new title. Title validation (non-empty, max length) lives in `update_case_meta`, not the endpoint.
-- **Lock cleanup race** (ISSUE-M3-006): after `delete_case`, the case_id is no longer in `_case_locks`. A subsequent `chat_structured` for the same id creates a new lock cleanly.
+- **Retained-lock concurrency regression**: start one operation holding a case lock, queue `delete_case`, then queue a new `chat_structured` for the same UUID. Assert all three operations use the exact same lock object and execute serially. After deletion, the UUID remains in `_case_locks`; this is intentional and prevents the old-lock/new-lock race.
 
 ### `tests/test_agent.py` (extend)
 - Existing test stays.
@@ -1105,24 +1091,60 @@ All string-content assertions become field assertions:
 - Add: `test_context_var_resets_after_request` (ISSUE-DS-008) — after `chat_structured(style="simples")` returns, `_current_style.get()` is `None` again (no leakage to the next request). Use a real `ChatService` with a fake `ChatBackend` and a fake `ReviewerLike`.
 - Add: `test_context_var_visible_inside_chat_structured` (ISSUE-DS-008) — inside the backend call, `_current_style.get()` returns the value passed to `chat_structured`. Pins the in-request propagation.
 
+### `tests/test_cli.py` (new)
+- Mock `agent.run_stream` and `review_response`.
+- Assert generated tokens/prose are not printed before reviewer approval.
+- Approved response → final prose displayed once and approved `chat_history`/`model_history` saved.
+- Blocked response → only `REVIEW_BLOCKED_MESSAGE` displayed; generated prose/new model messages are not displayed or saved.
+
+### `base_frontend/src/api.test.ts` (new)
+- Use Vitest to test the pure wire mappers without rendering React.
+- Assert `mapChatMessage` maps every snake_case nested field, including deadline dates/base/note.
+- Assert `mapStructuredResponse` maps the complete returned history.
+- Assert `mapCaseSummary` and `mapCaseResponse` always populate required `timestamp`, `date`, `lastMessage`, `iconName`, `responseStyle`, and `chatHistory`.
+
+### `base_frontend/src/App.test.tsx` (new)
+- Use Vitest + React Testing Library with `global.fetch` mocked.
+- Selecting, renaming, and deleting a demo case makes no API request.
+- Sending while a demo is active posts `session_id: null`, then removes demos after the successful real-case response.
+- A blocked `422` response renders `blocked_message`; the next send reuses the returned `session_id`.
+- Starting a quick-guide consultation while a real case is active sends `session_id: null` with an empty base history and does not append to or mutate the previously active case (ISSUE-REVIEW-006).
+- Selecting, renaming, and deleting a real case calls the expected UUID endpoint.
+
 ### `Makefile`
 ```makefile
-frontend:    cd base_frontend && npm ci && npm run build
-dev-api:     uv run advogado-api
-dev-frontend: cd base_frontend && npm run dev
-dev:         make -j2 dev-api dev-frontend
+frontend:
+	cd base_frontend && npm ci && npm run build
+
+dev-api:
+	uv run advogado-api
+
+dev-frontend:
+	cd base_frontend && npm run dev
+
+dev:
+	$(MAKE) -j2 dev-api dev-frontend
 ```
 
 ### `base_frontend/src/api.ts` (new)
 Thin HTTP client + snake↔camel mapper:
-- `mapStructuredResponse(payload, sessionId): ChatMessage` — maps the server response to a UI `ChatMessage`, sets `tagText` from `deadline`/`templateLetter` truthiness, derives `date` from `updated_at` ("Hoje" | "Ontem" | "DD MMM").
-- `mapCaseSummary(payload): Case` — maps `CaseSummary` to UI `Case`, derives `date` from `updated_at`.
+- Define explicit snake_case wire interfaces for `WireDeadlineResult`, `WireChatMessage`, `WireStructuredChatResponse`, `WireCaseSummary`, and `WireCaseResponse`. Do not cast API JSON directly to UI types.
+- `mapDeadline(payload): Deadline` — maps `data_inicio → startDate`, `data_limite → endDate`, `base_legal → base`, `nota → note`, derives `title = "Prazo calculado"`, and derives a user-facing `type` from `item_label` or `tipo_prazo`.
+- `mapChatMessage(payload): ChatMessage` — maps every snake_case nested field (`step_title`, `relevant_content`, `suggestive_text`, `template_letter`, `quick_replies`, and `deadline`) to the camelCase UI shape.
+- `mapStructuredResponse(payload): { sessionId: string; updatedAt: string; chatHistory: ChatMessage[] }` — maps the full server-returned history. It does **not** set `tagText` or `date`, because those fields belong to `Case`, not `ChatMessage`.
+- `mapCaseSummary(payload): Case` — maps summary metadata, derives `date` from `updated_at` ("Hoje" | "Ontem" | "DD MMM"), sets `timestamp = Date.parse(updated_at)`, maps `lastMessage = last_message`, derives `tagText` from the server summary, and initializes `chatHistory: []`.
+- `mapCaseResponse(payload): Case` — maps the complete selected-case metadata and every history item with `mapChatMessage`; sets `timestamp = Date.parse(updated_at)`, derives `date` from `updated_at`, and derives required `lastMessage` from the last assistant message's `stepContent || text` (falling back to `""` when no assistant message exists). `tagText` is derived from the last assistant message: deadline → `"Prazo calculado"`, template letter → `"Mensagem pronta"`, otherwise `undefined`.
 - `chatStructured`, `listCases`, `getCase`, `renameCase`, `deleteCase`, `getHistory`.
 - `renameCase(caseId, newTitle)` (ISSUE-IND-002) is a **thin wrapper** around `updateCaseMeta(caseId, { title: newTitle })`: it PATCHes `/api/cases/{case_id}` with `{ title: newTitle }` and the server-side `update_case_meta` does the work. There is no dedicated `renameCase` REST endpoint; the PATCH is the single metadata-update surface. `handleRenameCase` in `App.tsx` calls this wrapper.
+- API-client methods accept server UUIDs only. Demo cases are intercepted by `App.tsx` before any API-client method is invoked.
 
 ### `base_frontend/src/defaults.ts` (new)
 - `initialPreferences` (moved from `App.tsx`).
 - `seedCases: Case[]` — the three demo cases, each with `is_demo: true` and a `tagText: "DEMO"`.
+
+### `base_frontend/package-lock.json` (generated)
+- Generate with `cd base_frontend && npm install` only after the final `package.json` rewrite.
+- Commit it because the Makefile and final verification intentionally use reproducible `npm ci` installs.
 
 ---
 
@@ -1141,16 +1163,22 @@ Return `list[KnowledgeChunk]`. Preserve the "fonte desconhecida" fallback. ISSUE
 See "Files to Create" section above. Add `@agent.instructions` callback. Update `SYSTEM_PROMPT` to describe the new tool return shapes. Add `STYLE_PROMPTS` and `_current_style` ContextVar.
 
 ### `src/advogado_de_bolso/service.py`
-See "Files to Create" section above. Drop `chat`, `clear_session`, `session_history`, `session_count`, `_max_sessions`, `_evict_old_sessions`, `_max_history_messages`. Add `chat_structured`, `list_cases`, `get_case`, `update_case_meta`, `delete_case`, `get_history` (`rename_case` removed per ISSUE-IND-002 — the PATCH endpoint delegates to `update_case_meta`, and a single-field rename is just `update_case_meta(case_id, title=new_title)`). Add per-case `asyncio.Lock` registry. Add `StructuredChatResponse` dataclass (renamed from `ChatReply`). 20-turn cap on LLM-bound history.
+See "Files to Create" section above. Drop `chat`, `clear_session`, `session_history`, `session_count`, `_max_sessions`, `_evict_old_sessions`, `_max_history_messages`. Add `chat_structured`, `list_cases`, `get_case`, `update_case_meta`, `delete_case`, `get_history` (`rename_case` removed per ISSUE-IND-002 — the PATCH endpoint delegates to `update_case_meta`, and a single-field rename is just `update_case_meta(case_id, title=new_title)`). Add the retained per-case `asyncio.Lock` registry and the `ChatResult` dataclass wrapper (replacing `ChatReply`). Apply the 20-turn cap only to LLM-bound history.
 
 ### `src/advogado_de_bolso/api.py`
 See "Files to Create" section above. Drop the old endpoints. Add the new ones. Use explicit SPA fallback. Return 422 for blocked.
 
 ### `src/advogado_de_bolso/cli.py`
-See "Files to Create" section above. Keep `agent.run_stream`. Write case files to `./storage/cases/` (same as API per ISSUE-010). Streaming UX preserved.
+See "Files to Create" section above. Keep `agent.run_stream`, but buffer generated prose until `review_response()` approves it. Preserve spinner/live status, not token-by-token answer display. Write only approved turns to `./storage/cases/` (same as API per ISSUE-010).
 
 ### `src/advogado_de_bolso/config.py`
 Add `cases_path: Path = Field(default=Path("./storage/cases"), alias="CASES_PATH")` (ISSUE-M3-014). The env alias keeps `Settings` consistent with `DATA_PATH` / `CHROMA_PATH` / `HF_HOME` which all use `Field(..., alias=...)`. **Also ensure the value is wired into the service via `build_chat_service(settings, deps_factory)` → `ChatService(..., cases_path=settings.cases_path)`** (ISSUE-USR-007); without that injection the env var is dead.
+
+### `.env.example`
+Add `CASES_PATH=./storage/cases` next to `CHROMA_PATH`.
+
+### `README.md`
+Document `make dev`, `make frontend`, production startup with `uv run advogado-api`, the required single-worker deployment mode, the `<1000` case-file assumption, and unsupported concurrent API + CLI writes.
 
 ### `tests/test_calculos.py`
 Rewrite (see above).
@@ -1170,6 +1198,9 @@ Rewrite (see above).
 ### `tests/test_agent.py`
 Extend (see above).
 
+### `tests/test_config.py`
+Add a test that `CASES_PATH` overrides the default and produces a `Path`.
+
 ### `base_frontend/package.json`
 ISSUE-M3-004: full rewrite. The current `package.json` references `server.ts` in FOUR scripts (`dev`, `build`, `start`, `clean`). After the file deletion, every one of these breaks. The full set of changes:
 
@@ -1179,9 +1210,12 @@ ISSUE-M3-004: full rewrite. The current `package.json` references `server.ts` in
 - `"clean"`: `"rimraf dist"` or `"rm -rf dist"` (was `"rm -rf dist server.js"`)
 - `"preview"`: `"vite preview"` (kept; useful for testing the prod build)
 - `"lint"`: `"tsc --noEmit"` (kept)
+- `"test"`: `"vitest run"` (new; runs mapper and App integration tests)
 - Remove `dependencies`: `@google/genai`, `express`, `dotenv`, `motion` (all consumed only by the deleted `server.ts`)
 - Remove `devDependencies`: `tsx`, `esbuild`, `@types/express` (consumed only by the deleted `server.ts`)
+- Add `devDependencies`: `vitest`, `jsdom`, `@testing-library/react`, `@testing-library/jest-dom`.
 - **KEEP** `devDependencies: @types/node` (ISSUE-USR-014): the rewritten `vite.config.ts` (and the kept `lint` script which runs `tsc --noEmit`, see line 1134 below) still consumes Node ambient types. `vite.config.ts` imports `path` from `'path'` (line 3), uses `__dirname` (line 11) for `path.resolve(__dirname, '.')`, and reads `process.env.DISABLE_HMR` (lines 17, 19) for the HMR toggle. None of these compile under `tsc` without `@types/node`. Removing `@types/node` would break `npm run lint` (the `tsc --noEmit` gate, kept on line 1134). The only reason `@types/node` would have been removable is if `vite.config.ts` were rewritten to use `import.meta.url` + `fileURLToPath(new URL('.', import.meta.url))` (still requires `@types/node` for `URL` ambient types in many TS configs) or a pure-browser `URL`/`import.meta` style without `path`/`__dirname`/`process.env` (which the current `vite.config.ts` does not satisfy). We pick the simpler path: keep `@types/node` in `devDependencies`. The earlier claim that `@types/node` is "consumed only by the deleted `server.ts`" is incorrect; `vite.config.ts` and the `tsc --noEmit` lint script are also consumers.
+- Run `npm install` once after rewriting `package.json` to generate and commit `base_frontend/package-lock.json`. The committed lockfile is required because the Makefile's reproducible production target intentionally uses `npm ci`.
 - Environment variables `GEMINI_API_KEY` and the Express-specific `PORT` are no longer used; the FastAPI server reads its own env (`GOOGLE_API_KEY`, `ADVOGADO_API_HOST`, `ADVOGADO_API_PORT`).
 
 ### `base_frontend/vite.config.ts`
@@ -1209,29 +1243,43 @@ ISSUE-M3-016: explicitly **delete** the inline `seedCases` (lines 20-130, ~110 l
 import { seedCases, initialPreferences } from "./defaults";
 ```
 - The `is_demo: true` flag on each seed case stays frontend-only (ISSUE-M3-005). The server never sets `is_demo: true`. `CaseSummary.is_demo` is reserved for future server-side template cases and is not used today.
-- Add `useState<boolean>(true)` for `isLoadingCases` (ISSUE-M3-017). On mount, call `apiClient.listCases()`. While loading, show a spinner; when done, render the list.
+- Add `useState<boolean>(true)` for `isLoadingCases` (ISSUE-M3-017). On mount, call `apiClient.listCases()`. While loading, show a spinner. When loading succeeds, render mapped real cases if any exist; otherwise render `seedCases`. This prevents an empty server response from accidentally removing the demos before the first real case is created.
 - **Rename** the existing `isLoading` (per-message chat spinner) to `isSendingMessage` (ISSUE-M3-017). Update `ChatInterface` props to use `isSendingMessage`. The two loading flags now have unambiguous names.
 - `handleSendMessage`:
+  - Change the signature to `handleSendMessage(text, options?: { forceNewCase?: boolean })`. When `forceNewCase === true`, derive the request from an explicit empty conversation snapshot, ignore/clear any pending blocked-case retry ID, and send `session_id: null` regardless of the currently-rendered `activeCaseId`/`currentChatHistory`. Do not rely on preceding `setActiveCaseId(null)` or `setCurrentChatHistory([])` calls being visible synchronously; React state updates are asynchronous (ISSUE-REVIEW-006).
   - If `activeCaseId === null`, this is the first message of a new case. Compute `title` and `icon_name` from the message text (current keyword logic from `App.tsx:296-340`). Send `{message, session_id: null, response_style, title, icon_name}` to `POST /api/chat/structured` (ISSUE-DS-005: NOT `/api/chat`, which is deleted).
-  - On response, set `activeCaseId = resData.session_id`.
+  - If the active case is a demo, treat the send as the first message of a **new real case**: clear the demo history from the active conversation, compute title/icon from the new message, and send `session_id: null`. Never send the demo's non-UUID ID. On success, replace the active demo with the newly-created real case response.
+  - On response, use `mapStructuredResponse`; set `activeCaseId = mapped.sessionId` and replace `currentChatHistory` with `mapped.chatHistory`. Derive case-level `date`/`tagText` separately when updating the local case list.
   - **Error handling** (ISSUE-DS-002 + ISSUE-USR-004): if `!response.ok`, parse the body. If `body.blocked === true`, display `body.blocked_message` to the user via the chat (not a generic error). Capture `body.session_id` from the 422 body if present, store it in a ref (e.g., `pendingBlockedCaseIdRef`), and — on the next send — reuse it as the `session_id` for the retry. This avoids orphan cases on blocked first messages (the server already skipped `cases.save` for blocked-new-case per ISSUE-USR-004, but if any old code path persists the blocked case, the client must still pin the id to prevent duplicates).
+- `handleStartConsultation(initialPrompt?)`: clear the visible selection/history as today. If `initialPrompt` is present (the quick-guide path), call `handleSendMessage(initialPrompt, { forceNewCase: true })`. This explicit option prevents the immediate call from closing over the previously active case before React commits the clearing state updates.
 - `handleSaveCaseFromChat`:
-  - Fires the PATCH **only when the user has manually edited the title/icon AND the case already exists server-side** (ISSUE-M3-013). The first-message auto-create flow does NOT trigger a save PATCH because the title/icon are already in the request body that the server just used to create the case.
-  - Sends a single `PATCH /api/cases/{case_id}` with the new `UpdateCaseRequest` body `{ title?, icon_name?, response_style? }` (ISSUE-USR-005). The `apiClient` exposes one `updateCaseMeta(caseId, fields)` method that accepts a partial `UpdateCaseRequest` payload; the client omits unset fields. The previous two-call approach (`renameCase` + `updateCaseMeta`) is collapsed into one call.
-- `handleSelectCase` → `apiClient.getCase(caseId)`.
-- `handleDeleteCase` → `apiClient.deleteCase(caseId)`.
-- `handleRenameCase` → `apiClient.renameCase(caseId, newTitle)`, which under the hood calls `apiClient.updateCaseMeta(caseId, { title: newTitle })` and issues `PATCH /api/cases/{case_id}` with `{ title }` (ISSUE-IND-002). There is no dedicated `renameCase` REST endpoint; the frontend rename is a PATCH with a `{ title }` body.
-- The `history` field in the request body is removed (server is now the source of truth; the server returns the full chat history with each response via the `chat_history: list[ChatMessage]` field on `StructuredChatResponse` per ISSUE-USR-015).
-- Filter out `is_demo` cases when the first real case is created (clear them from local state, never re-add).
+  - This is the explicit user-triggered "save this generated result" action from the tool card. It does not create cases because the first successful message already auto-created one.
+  - If there is no active case or the active case is a demo, return without an API call.
+  - Derive `title` and `icon_name` from the first user message using the same pure `deriveCaseMeta(text)` helper used by first-message auto-create. Send exactly one `updateCaseMeta(activeCaseId, { title, icon_name })` PATCH and merge the returned `CaseResponse` into local state.
+  - `response_style` is not sent by this handler. `handleUpdatePreferences` PATCHes `{ response_style }` when a real case is active; otherwise the selected preference is sent with the next first-message request and becomes the new case default.
+  - The first-message auto-create flow MUST NOT call this handler automatically; its title/icon are already in the structured chat request.
+- `handleSelectCase`: if the selected case has `is_demo === true`, load its bundled `chatHistory` locally and do **not** call the API. Otherwise call `apiClient.getCase(caseId)`.
+- `handleDeleteCase`: if the selected case has `is_demo === true`, remove it from local state only. Otherwise call `apiClient.deleteCase(caseId)`.
+- `handleRenameCase`: if the selected case has `is_demo === true`, rename it in local state only. Otherwise call `apiClient.renameCase(caseId, newTitle)`, which under the hood calls `apiClient.updateCaseMeta(caseId, { title: newTitle })` and issues `PATCH /api/cases/{case_id}` with `{ title }` (ISSUE-IND-002). There is no dedicated `renameCase` REST endpoint; the frontend rename is a PATCH with a `{ title }` body.
+- Demo IDs such as `"case-1"` are never passed to `chatStructured`, `getCase`, `updateCaseMeta`, `renameCase`, `deleteCase`, or `getHistory`; all API case IDs remain UUIDs.
+- The `history` field in the request body is removed (server is now the source of truth; the server returns the full snake_case chat history with each response, and `mapChatMessage` converts every item before it reaches React state).
+- Filter out `is_demo` cases when the first real case is created (clear them from local state, never re-add during that app session). A later full reload shows demos only if `listCases()` again returns no real cases.
+- Extract the current title/icon keyword logic into pure `deriveCaseMeta(text): { title: string; icon_name: IconName }`; both first-message auto-create and `handleSaveCaseFromChat` call it, preventing metadata drift.
+- `handleUpdatePreferences`: update local preferences immediately. If a real case is active and `responseStyle` changed, call `updateCaseMeta(activeCaseId, { response_style: updated.responseStyle })`; never PATCH demos or an unsaved/new conversation.
 
 ### `base_frontend/src/types.ts`
 - Add `is_demo?: boolean` to `Case` (ISSUE-M3-005). Frontend-only marker.
 - `iconName` union unchanged (4 hardcoded values).
 - `date: string` stays — client-derived by the mapper.
+- Keep `tagText` and `date` only on `Case`; do not add them to `ChatMessage`.
+
+### `base_frontend/src/components/ChatInterface.tsx`
+Rename the `isLoading` prop to `isSendingMessage` and update all message-submission conditions and disabled states. Case-list loading remains owned by `App.tsx`.
 
 ### `base_frontend/src/defaults.ts` (new, additional spec)
 - `initialPreferences` (moved from `App.tsx` lines 132-144).
 - `seedCases: Case[]` — the three demo cases, each with `is_demo: true` and a `tagText: "DEMO"`. These are the **only** `is_demo: true` cases in the system. The server never produces one.
+- Demo IDs remain the existing readable non-UUID values (`case-1`, `case-2`, `case-3`) to make their frontend-only status obvious. App handlers MUST branch on `is_demo` before invoking any API client method.
 
 ---
 
@@ -1244,30 +1292,17 @@ import { seedCases, initialPreferences } from "./defaults";
 ## Verification
 
 ### Implementation order (ISSUE-M3-018)
-Tests cannot pass during a partial implementation. To gate progress, the implementation MUST follow this order, with `pytest` green at the end of each step:
+The implementation uses gated batches. Tests may intentionally fail inside a batch while its production code and tests are being changed together. Do not start the next batch until the current batch's stated gate is green.
 
-1. Add `src/advogado_de_bolso/contracts.py` (the new typed envelopes).
-2. Refactor `src/advogado_de_bolso/tools/calculos.py` to return `DeadlineResult | str`.
-3. Refactor `src/advogado_de_bolso/tools/redigir.py` to return `DraftedDocument`.
-4. Refactor `src/advogado_de_bolso/tools/rag.py` to return `list[KnowledgeChunk]`.
-5. Rewrite `tests/test_calculos.py`, `tests/test_redigir.py`, `tests/test_rag_tool.py` to assert on the new types. **Run `pytest` — must be green.**
-6. Add `src/advogado_de_bolso/storage/__init__.py` and `src/advogado_de_bolso/storage/cases.py` with the directory-creation spec.
-7. Add `tests/test_storage.py`. **Run `pytest` — must be green.**
-8. Add `src/advogado_de_bolso/schemas.py` (wire types).
-9. Add `src/advogado_de_bolso/adapter.py` plus the three helper functions (`_extract_questions`, `_extract_suggestive_text`, `_derive_quick_replies`).
-10. Add `tests/test_adapter.py`. **Run `pytest` — must be green.**
-11. Add `Settings.cases_path` (with `alias="CASES_PATH"`) in `src/advogado_de_bolso/config.py`.
-12. Rewrite `src/advogado_de_bolso/agent.py` with the new `SYSTEM_PROMPT`, `STYLE_PROMPTS`, `_current_style` ContextVar, and `@agent.instructions` callback.
-13. Rewrite `src/advogado_de_bolso/service.py` with the new `ChatService`, `ChatResult`, helper functions, per-case locks, and `model_history` persistence.
-14. Rewrite `src/advogado_de_bolso/api.py` with the new endpoints, SPA fallback, and CORS.
-15. Rewrite `tests/test_service.py` and `tests/test_api.py`. **Run `pytest` — must be green.**
-16. Add `tests/test_agent.py` extension for `STYLE_PROMPTS` / `_current_style` / ContextVar scoping (ISSUE-DS-008).
-17. Frontend: clean up `base_frontend/package.json` (full script and dep rewrite).
-18. Frontend: add `server.proxy` to `base_frontend/vite.config.ts`.
-19. Frontend: add `src/api.ts` and `src/defaults.ts`; refactor `App.tsx` (delete inline `seedCases`/`initialPreferences`, rename `isLoading` → `isSendingMessage`, add `isLoadingCases`, update endpoint, add blocked-message parsing).
-20. Delete `base_frontend/server.ts`. **Run `npm run lint` (tsc) — must be green.**
-
-Do not move to step N+1 until step N's tests are green.
+1. **Typed tool contracts batch:** add `contracts.py`; update `tests/test_calculos.py`, `tests/test_redigir.py`, and `tests/test_rag_tool.py` to express the new contract and verify they fail for the expected old-string behavior; refactor the three tools; run `uv run pytest tests/test_calculos.py tests/test_redigir.py tests/test_rag_tool.py` and then `uv run pytest`. Both must pass.
+2. **Storage batch:** add `storage/__init__.py`, `storage/cases.py`, and `tests/test_storage.py`; run `uv run pytest tests/test_storage.py` and then `uv run pytest`.
+3. **Schema/adapter batch:** add `schemas.py`, `adapter.py`, and `tests/test_adapter.py`; run `uv run pytest tests/test_adapter.py` and then `uv run pytest`.
+4. **Service/API batch:** add `Settings.cases_path`, update `.env.example`, rewrite `agent.py`, `service.py`, and `api.py`, then rewrite/extend `tests/test_config.py`, `tests/test_agent.py`, `tests/test_service.py`, and `tests/test_api.py`; run those four test files, `uv run pytest`, `uv run ruff check src/ tests/`, and `uv run mypy src/`.
+5. **CLI batch:** rewrite `cli.py` and add `tests/test_cli.py`; run `uv run pytest tests/test_cli.py` and then `uv run pytest`.
+6. **Frontend dependency batch:** rewrite `base_frontend/package.json`, add the Vitest dependencies/scripts, run `npm install` in `base_frontend` to generate `base_frontend/package-lock.json`, and add the Vite proxy/test configuration. Do not use `npm ci` until the lockfile exists.
+7. **Frontend integration batch:** add `src/api.ts`, `src/defaults.ts`, `src/api.test.ts`, and `src/App.test.tsx`; refactor `App.tsx`, `ChatInterface.tsx`, and any affected components/types; delete `server.ts`; run `npm run test`, `npm run lint`, and `npm run build`.
+8. **Operations/docs batch:** add the `Makefile`; update `README.md` with production/dev commands, single-worker requirement, `<1000` case constraint, and API/CLI concurrent-write limitation; run every command in Functional Checks that does not require live model credentials.
+9. **Final gate:** run `uv run pytest`, `uv run ruff check src/ tests/`, `uv run mypy src/`, `cd base_frontend && npm ci`, `npm run test`, `npm run lint`, and `npm run build`.
 
 ### Functional checks
 1. `uv run pytest` — all tests pass.
@@ -1278,15 +1313,19 @@ Do not move to step N+1 until step N's tests are green.
 6. **Persistence**: create case, restart server, refresh → case still in list with history (and `model_history` is intact, so turn-2 follow-ups retain tool-call context per ISSUE-M3-001).
 7. **CRUD**: PATCH (rename), DELETE, list, select — all reflect immediately.
 8. **Style switching**: change `responseStyle` to `simples` → plainer prose. Verify the `_current_style` ContextVar is reset (no leakage between requests).
-9. **Reviewer block**: temporarily block → API returns 422 with `{"blocked": true, "blocked_message": "..."}`; frontend `handleSendMessage` parses the body and shows `blocked_message` to the user (ISSUE-DS-002).
+9. **Reviewer block**: temporarily block → API returns 422 with the full `StructuredChatResponse` envelope (`session_id`, unchanged `chat_history`, `blocked=true`, `blocked_message`); frontend `handleSendMessage` parses the body and shows `blocked_message` to the user. For an existing case, verify the rejected turn does not change persisted `chat_history` or `model_history`.
 10. **Demo cases**: on first load, three demo cases appear with a "DEMO" badge. After the first real case is created, demo cases disappear from the list.
 11. **Production**: `make frontend` then `uv run advogado-api` → React on :8000.
 12. **CORS**: PATCH/DELETE work from Vite on :5173 (allow_methods includes `"PATCH"` per ISSUE-DS-004).
-13. **CLI**: `uv run advogado` → streaming spinner works, case file written to `./storage/cases/` (same path as API per ISSUE-010). The CLI-created case is visible from the UI.
+13. **CLI**: `uv run advogado` → spinner/live status works while generation and review run; generated prose appears only after reviewer approval. A blocked answer displays only the safe blocked message and writes no turn. Approved case files are written to `./storage/cases/` and visible from the UI.
 14. **API typo**: `GET http://localhost:8000/api/chatt` → 404 (not 200 + HTML). Exact first-segment check per ISSUE-009.
-15. **Lock cleanup**: create a case, delete it, immediately create a new case with the same id → no lock leak (ISSUE-M3-006).
+15. **Retained lock serialization**: create a case, queue concurrent delete/recreate operations for the same UUID, and verify they all serialize on the same retained lock object; no old-lock/new-lock split is possible.
 16. **Empty prose**: agent returns empty string → `step_title = "Análise inicial"`, `step_content = ""` (ISSUE-004).
 17. **Unknown tool name**: tool returns content with an unexpected `tool_name` → logged at WARNING, not raised (ISSUE-DS-006).
+18. **UUID case routes**: malformed IDs on GET/PATCH/DELETE/history return 422 before storage access.
+19. **Frontend history mapping**: reload a persisted case containing deadline/template fields and verify all snake_case wire fields render correctly after mapping, including required `Case.timestamp` and `Case.lastMessage`.
+20. **Demo API isolation**: select, rename, and delete each demo case and verify no request is made to `/api/cases/case-*`. Send a message while a demo is active and verify the request uses `session_id: null`, creates a real UUID case, and removes demos.
+21. **Quick-guide isolation**: select a real persisted case, then start a HomeDashboard quick guide. Verify the outgoing request uses `session_id: null`, the new response becomes the active case, and the previously selected case remains unchanged.
 
 ---
 
@@ -1324,19 +1363,19 @@ The following reviewer issues were applied directly to this plan. Each is refere
 | ISSUE-M3-003 | Refactored `AgentChatBackend` shown without reviewer; `ChatService` runs reviewer exactly once. |
 | ISSUE-M3-004 | Full `package.json` rewrite spec'd (dev/build/start/clean + dep removal). |
 | ISSUE-M3-005 | `is_demo` documented as frontend-only marker. |
-| ISSUE-M3-006 | `delete_case` acquires per-case lock before deleting. |
+| ISSUE-M3-006 | `delete_case` acquires the per-case lock before deleting; locks are retained for the service lifetime to prevent an old-lock/new-lock concurrency split. |
 | ISSUE-M3-007 | `response_style` semantics clarified: persisted as case default + per-request override. |
 | ISSUE-M3-008 | `update_case_meta` wired into `PATCH /api/cases/{case_id}`. |
 | ISSUE-M3-009 | Replaced line numbers with type/method references. |
 | ISSUE-M3-010 | Adapter uses `isinstance(content, (list, tuple))`. |
 | ISSUE-M3-011 | Dropped `TypeAdapter.validate_python` redundant call. |
 | ISSUE-M3-012 | `SYSTEM_PROMPT` now treats an empty `search_knowledge_base` result as the no-results signal (updated again in round 17 per ISSUE-USR-017 to use `[]` rather than the previous `fonte="sistema"` sentinel). |
-| ISSUE-M3-013 | `handleSaveCaseFromChat` PATCH fires only on manual edit. |
+| ISSUE-M3-013 | `handleSaveCaseFromChat` is an explicit user-triggered metadata PATCH for an already-persisted real case; auto-create never triggers a redundant PATCH. |
 | ISSUE-M3-014 | `cases_path` uses `Field(..., alias="CASES_PATH")`. |
 | ISSUE-M3-015 | Error contract: API catches backend/save exceptions, returns 503. |
 | ISSUE-M3-016 | Explicit "delete inline `seedCases`/`initialPreferences`" added to App.tsx section. |
 | ISSUE-M3-017 | `isLoading` renamed to `isSendingMessage`; new `isLoadingCases`. |
-| ISSUE-M3-018 | 20-step ordered implementation with per-step `pytest` gate. |
+| ISSUE-M3-018 | Ordered implementation with per-step `pytest` gate (now 21 steps after adding the CLI reviewer gate). |
 | ISSUE-DS-001 | `_now()` defined at module scope. |
 | ISSUE-DS-002 | Frontend `handleSendMessage` parses body and surfaces `blocked_message`. |
 | ISSUE-DS-003 | `vite.config.ts` `server.proxy` fully spec'd. |
@@ -1347,11 +1386,21 @@ The following reviewer issues were applied directly to this plan. Each is refere
 | ISSUE-DS-008 | ContextVar scoping test added; single-task assumption documented. |
 | ISSUE-USR-011 | `AgentRunResult` import path corrected from `pydantic_ai.tools` to `pydantic_ai` (top-level re-export). |
 | ISSUE-USR-012 | `_current_style` imported from `.agent` into `service.py` (added to the import block before the local helper definitions). |
-| ISSUE-USR-013 | `update_case_meta` now acquires the per-case `asyncio.Lock` around the load/validate/save body (mirroring `delete_case`); CLI write safety documented in the cli.py section as atomic `os.replace` via the storage layer. |
+| ISSUE-USR-013 | `update_case_meta` now acquires the per-case `asyncio.Lock` around the load/validate/save body (mirroring `delete_case`); unique-temp atomic replacement prevents torn JSON, while cross-process API/CLI lost updates are explicitly unsupported. |
 | ISSUE-USR-014 | `@types/node` kept in `devDependencies` (NOT removed); `vite.config.ts` spec retains the existing `path`/`__dirname`/`process.env` usage and the `server.proxy` config from DS-003. |
 | ISSUE-USR-015 | `StructuredChatResponse` augmented with `updated_at: datetime` and `chat_history: list[ChatMessage]`. `chat_structured` populates both before returning. The "server returns the full chat history" claim is now backed by the schema. `WireResponse` alias from ISSUE-002 still type-checks. |
 | ISSUE-USR-016 | Persistence test relaxed: asserts `ToolReturnPart.content` is a `dict` with matching field values (not `isinstance(_, DeadlineResult)`) after JSON round-trip. In-memory `tool_plain` test (line 995) still asserts `isinstance(_, DeadlineResult)`. |
 | ISSUE-USR-017 | Kept the "Responda APENAS com o texto final" prompt in `redigir.py` (line 1076 aligned with Open Decision #1, line 1236). Empty RAG result is `[]` (not the previous sentinel `KnowledgeChunk(fonte="sistema", ...)`); `rag.py` spec (line 1139) and SYSTEM_PROMPT (line 369) updated to match. |
+| REVIEW-001 | Removed lock cleanup on delete; retaining one lock per observed UUID prevents waiters on an old lock from racing operations on a replacement lock. |
+| REVIEW-002 | Demo selection/rename/delete are frontend-only; non-UUID demo IDs never reach UUID-typed API routes. |
+| REVIEW-003 | Corrected the "Posso..." regex so capture group 1 contains the complete question. |
+| REVIEW-004 | Existing-case chat requests ignore `title`/`icon_name`; PATCH is the only metadata-update path. |
+| REVIEW-005 | Fully specified `mapCaseSummary`/`mapCaseResponse` required `timestamp` and `lastMessage` fields plus deterministic demo-vs-real initial loading. |
+| ISSUE-REVIEW-006 | Quick-guide sends now use an explicit `forceNewCase` option so asynchronous React state clearing cannot append to the previously active case. |
+| ISSUE-REVIEW-007 | `StructuredChatRequest` and `UpdateCaseRequest` reuse the same constrained title/icon/style aliases; invalid auto-create metadata is rejected before persistence. |
+| ISSUE-REVIEW-008 | Service example imports and backend annotations are strict Ruff/mypy-compatible, and the service/API batch now runs both gates. |
+| ISSUE-REVIEW-009 | `ChatMessage` requires `id`, `sender`, `text`, and `timestamp`; only structured assistant-display fields are optional. |
+| ISSUE-REVIEW-010 | Reviewer-blocked HTTP 422 contract is standardized on the full `StructuredChatResponse` envelope throughout the plan and tests. |
 
 ---
 
@@ -1360,6 +1409,8 @@ The following reviewer issues were applied directly to this plan. Each is refere
 - **Multi-worker `uvicorn`**: not supported. The plan assumes a single worker. Multi-worker would break the in-process `asyncio.Lock` registry and the `_current_style` ContextVar. Document in README.
 - **`_index.json`**: not built. `list_all()` scans the directory. Acceptable for the expected scale (<1000 cases, per ISSUE-DS-007 — the constraint is documented in the `storage/cases.py` module docstring and in the project README; a soft `INFO` log fires when the file count exceeds 500). If the scale grows, add a startup disk-scan-rebuild index (not planned now).
 - **Auth / multi-user**: not in scope. The plan assumes a single local user.
-- **Streaming for the API**: not in scope. The plan's `POST /api/chat/structured` is request/response. The CLI keeps streaming via `agent.run_stream` directly.
+- **Streaming for the API**: not in scope. The plan's `POST /api/chat/structured` is request/response. The CLI still uses `agent.run_stream` internally, but buffers answer tokens until reviewer approval.
+- **Concurrent API + CLI edits to the same case**: not supported. Unique-temp `os.replace` prevents malformed/torn JSON but does not serialize cross-process read-modify-write transactions; simultaneous edits use last-writer-wins semantics.
+- **Per-case lock registry lifetime**: locks are intentionally retained until process exit. Under the documented `<1000`-case local-user constraint, this avoids a correctness race at negligible memory cost. If the scale grows, replace the registry with reference-counted lock entries that cannot be evicted while held or awaited.
 - **Single-task ContextVar scoping** (ISSUE-DS-008): `_current_style` is a `ContextVar` reset by `chat_structured`'s `try/finally`. It propagates task-locally to any sub-agent run in the same `await` chain. Today no sub-agent reads `_current_style`, so the coupling is safe. If a future sub-agent needs style awareness, it MUST receive the style via `ctx.deps`, not via the ContextVar. The `tests/test_agent.py` extension includes a scoping test that runs a fake sub-agent and asserts the parent ContextVar does not leak after `chat_structured` returns.
 - **Sub-agent LRU cache**: the drafting and reviewer sub-agents are cached at module scope (existing pattern at `tools/redigir.py:60`). They are created once and never read `_current_style`. This is the primary mitigation for ISSUE-DS-008.
