@@ -150,3 +150,25 @@ Compact chronological log of fixer subagent activities.
   - **M3-012 (fonte="sistema" no-results):** USR-017's empty-list RAG result is a refinement — the SYSTEM_PROMPT's no-results handling is preserved (the LLM still acknowledges "no relevant info"), but the dispatch shape is now `[]` instead of a sentinel. The M3-012 tracking-table row is updated.
   - All 47 other closed issues: No impact from the 7 USR fixes.
 - **Bookkeeping note**: All 7 issue statuses were updated from `verified` → `fixing` → `fixed_pending_review` in `.opencode/loop/open-issues.md`. No pre-existing votes or notes from any reviewer were modified.
+
+## Round 20 — splitter (fixer)
+
+- **Date**: 2026-06-15
+- **Fixer**: splitter
+- **Scope**: ISSUE-DEC-001 (decomposition proposal) — apply the round-19 split of the 1416-line evised-integration-plan.md into 25 topic files plus an index, replace the original with a thin-index at the same path. The 3 candidate splitter instructions (mimo DEC-002, mimo DEC-003, deepseek DEC-002) were ddressed (noted under their status fields in .opencode/loop/open-issues.md).
+- **Summary**: 1 fixed_pending_review, 0 blocked, 0 untouched, tests: n/a (structural split only, no source code).
+- **Files created**: 25 sibling files under .opencode/plans/ (00-overview-and-architecture.md through 24-out-of-scope.md, plus 99-index.md); thin-index replacement of .opencode/plans/revised-integration-plan.md; .opencode/loop/notes/split-manifest.md; .opencode/AGENTS.md (new child DOX).
+- **Files replaced**: .opencode/plans/revised-integration-plan.md (now ~50-line thin index referencing the 25 sibling files).
+- **Notable fixes**:
+  - **ISSUE-DEC-001 (apply decomposition):** All 25 sibling files created with 4-6 line headers and semantic cross-references. The Create/Modify duplication resolved by placing full specs in concern-grouped files (items 6-16) and one-line pointers in 18-frontend-modifications.md. Source plan content preserved verbatim.
+  - **ISSUE-DEC-002 (mimo-reviewer, line-count):**  6-service-class.md header explicitly states "lines 394-805" with the correct line count. Updated line-count estimate is plausible per the proposal's §6 Q3 acknowledgment.
+  - **ISSUE-DEC-003 (mimo-reviewer, cross-ref pointer):** 19-files-to-delete.md header now includes a **See also:** pointer to  0-overview-and-architecture.md.
+  - **ISSUE-DEC-002 (deepseek-reviewer, package-lock.json range):** 10-frontend-build-and-config.md now covers source lines 1113-1127 (Makefile), 1145-1147 (package-lock.json generated section), and 1204-1238 (package.json + vite.config.ts). The 3-line package-lock.json content is fully present in the new file.
+- **Verification**:
+  - All 25 sibling files exist under .opencode/plans/.
+  - The thin-index at .opencode/plans/revised-integration-plan.md exists and references all 25 new files.
+  - .opencode/AGENTS.md references the new file structure.
+  - .opencode/loop/notes/split-manifest.md exists with the audit table.
+  - Original source plan is fully consumed (no orphan content); the original 1416-line content is preserved verbatim across the 25 sibling files.
+- **Regression risk against the 60 already-closed issues**: low. The split is structural only; no content was paraphrased, dropped, or merged. The Create/Modify duplication was resolved by placing the full spec once and using a one-line pointer in the duplicate location (per the proposal's §6 Q4 strategy). All 60 closed issues remain in scope of their original sections; the split preserves them verbatim.
+- **Bookkeeping note**: All DEC-001 Status: fields in .opencode/loop/open-issues.md were updated from erified → ixing (BEFORE starting the split) → closed (AFTER completing the split) with a one-line ix-notes: confirming the split was applied. The 3 candidate instructions (mimo DEC-002, mimo DEC-003, deepseek DEC-002) were marked as ddressed (a new sub-status) in notes lines under each, with their status field kept at candidate so the loop still knows they exist.

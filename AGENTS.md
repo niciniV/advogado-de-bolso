@@ -26,7 +26,9 @@ Agentic chatbot for Brazilian consumer rights (CDC/Lei 8.078/90). Python 3.11+, 
 | `tests/conftest.py` | Shared fixtures: settings, mocks, deps, ctx |
 | `tests/test_*.py` | Unit tests mirroring src structure |
 | `pyproject.toml` | Build config, deps, ruff/pytest/mypy settings |
-| `.opencode/plans/revised-integration-plan.md` | Active implementation plan |
+| `.opencode/plans/revised-integration-plan.md` | Active implementation plan (thin-index; full plan split into 25 topic files `00-…`-`24-…` plus `99-index.md` under `.opencode/plans/`) |
+| `.opencode/AGENTS.md` | Child DOX for `.opencode/` (lists all 27 plan files and other `.opencode/` contents) |
+| `.opencode/loop/` | Orchestration state, open issues, review log, fix log, decomposition proposal, split manifest |
 
 ## Child DOX Index
 
@@ -34,3 +36,4 @@ Agentic chatbot for Brazilian consumer rights (CDC/Lei 8.078/90). Python 3.11+, 
   - `src/advogado_de_bolso/knowledge/` - Vector index, document loaders, ChromaDB + LlamaIndex
   - `src/advogado_de_bolso/tools/` - Agent tools: RAG search, CDC calculations, drafting, review
 - `tests/` - Test suite: unit tests, fixtures, coverage
+- `.opencode/` - Opencode plan + loop bookkeeping (see `.opencode/AGENTS.md` for full file map)

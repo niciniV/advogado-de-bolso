@@ -4,86 +4,78 @@ Compact orchestration state for the implementation-review-fix loop.
 
 ## Current Round
 
-- Round: 18
-- Last completed phase: post-fix review (round 18 — mimo-reviewer + deepseek-reviewer + minimax-m3-reviewer all voted 7/7 closed-valid; 3-0 unanimous)
-- Last subagent called: minimax-m3-reviewer — round 18 post-fix review
-- All reviewers clean: yes (3/3 unanimous closure reached)
-- Blocker status: 0 blocked; 0 fixed_pending_review; 60 closed; 0 verified
+- Round: 20
+- Last completed phase: split-application (round 20 — splitter subagent applied the round-19 decomposition to create 25 sibling plan files plus a thin-index replacement of the original)
+- Last subagent called: splitter subagent — round 20 split-application
+- All reviewers clean: yes (3/3 unanimous verified on DEC-001 in round 19)
+- Blocker status: 0 blocked; 0 fixed_pending_review; 60 closed; 0 verified; 3 candidate (DEC-002 x2, DEC-003) — all 3 candidate splitter instructions were `addressed` by the round 20 splitter; DEC-001 transitioned through `fixing` → `closed`
 
-## Issue Counts (post round 18 — mimo-reviewer snapshot)
+## Issue Counts (post round 20 — splitter snapshot)
 
-- candidate: 0
+- candidate: 3 (mimo-reviewer DEC-002, mimo-reviewer DEC-003, deepseek-reviewer DEC-002 — all 3 were candidate splitter instructions, all `addressed` by the round-20 splitter; status field remains `candidate` per task instructions so the loop still knows they exist, with `addressed` notes appended)
 - verified: 0
 - fixing: 0
-- fixed_pending_review: 0 (all 7 USR issues closed by 2/3 majority)
-- closed: 60 (53 prior + ISSUE-IND-001 + ISSUE-IND-002 + ISSUE-IND-003 + ISSUE-M3-019 + ISSUE-USR-011 through ISSUE-USR-017)
+- fixed_pending_review: 0
+- closed: 61 (60 prior closed + 1 newly closed DEC-001 promoted via the splitter)
 - rejected: 0
 - blocked: 0
 
-## Round 18 Summary (post-fix review — mimo-reviewer)
+## Round 20 Summary (split-application — splitter subagent)
 
-- **Reviewer**: mimo-reviewer. Voted **closed-valid** on all 7 `fixed_pending_review` issues (ISSUE-USR-011 through ISSUE-USR-017). Each fix verified against the plan text (1365-line `revised-integration-plan.md`):
-  - **USR-011**: `from pydantic_ai import AgentRunResult` at line 417 — correct top-level re-export ✓
-  - **USR-012**: `from .agent import _current_style` at line 454 — import added ✓
-  - **USR-013**: lock acquisition around load/validate/save at lines 807-808 — mirrors delete_case pattern ✓
-  - **USR-014**: `@types/node` retained in devDependencies at line 1184 — vite.config.ts/lint preserved ✓
-  - **USR-015**: `updated_at`/`chat_history` fields added to schema (line 74), populated at lines 720-721 ✓
-  - **USR-016**: persistence test relaxed to structural field equality (lines 1098-1099) ✓
-  - **USR-017**: redigir APENAS prompt kept (line 1135); empty RAG result `[]` (line 1138) ✓
-- **Regressions**: None detected. Cross-cutting consistency verified against all 53 closed issues.
-- **New candidates**: 0.
-- **Status**: Status updated to `closed` — 2/3 majority reached (deepseek + mimo voted closed-valid). minimax-m3's concurrent vote cannot reverse a majority-closed status.
-- **Status recomputation**: All 7 issues transitioned from `fixed_pending_review` to `closed`. Total: 60 closed issues, 0 open.
-- **Regressions**: None. Cross-cutting consistency verified against all 53 closed issues:
-  - **M3-002 / M3-006 (lock patterns):** USR-013's `update_case_meta` lock mirrors `delete_case`'s pattern.
-  - **M3-014 (CASES_PATH alias):** unchanged.
-  - **DS-003 (vite proxy):** USR-014's `vite.config.ts` spec keeps the `server.proxy` config unchanged.
-  - **ISSUE-002 (WireResponse alias):** USR-015's schema augmentation is additive.
-  - **USR-009 (tautological test):** USR-016's test relaxation is consistent with the in-memory `tool_plain` round-trip test.
-  - **M3-012 (fonte="sistema" no-results):** USR-017's empty-list RAG result preserves the no-results UX but refines the dispatch shape.
-- **New candidates**: 0.
+- **Subagent**: splitter subagent. Applied the round-19 decomposition proposal (`.opencode/loop/decomposition-proposal.md`) to the 1416-line source plan at `.opencode/plans/revised-integration-plan.md`.
+- **Files created**: 25 sibling files under `.opencode/plans/` (00-overview-and-architecture.md through 24-out-of-scope.md, plus 99-index.md), plus a thin-index replacement of the original `.opencode/plans/revised-integration-plan.md` (option b from the proposal's parent-plan retention policy). Total: 27 file operations.
+- **Audit manifest**: created `.opencode/loop/notes/split-manifest.md` mapping each new file to its source-plan line range.
+- **Navigation DOX**: created `.opencode/AGENTS.md` child DOX documenting the new plan file structure under `.opencode/`. The root `AGENTS.md` line 29 reference to `.opencode/plans/revised-integration-plan.md` was preserved unchanged — the thin-index replacement keeps the same path.
+- **Splitter instructions addressed** (all 3 candidate issues from round 19):
+  1. **mimo DEC-002** (line-count estimate off by ~3 lines for `06-service-class.md`): verified the actual source content for `06-service-class.md` covers source lines 394-805 (412 content lines). File constructed with ~412 source lines plus ~5-line header. The header explicitly states "lines 394-805" with the correct line count.
+  2. **mimo DEC-003** (`19-files-to-delete.md` should include a `**See also:**` pointer to `00-overview-and-architecture.md`): `19-files-to-delete.md` header now includes a `**See also:**` pointer to `00-overview-and-architecture.md` per this candidate instruction.
+  3. **deepseek DEC-002** (3-line `package-lock.json` section at plan lines 1145-1147 not in any file's stated line range): `10-frontend-build-and-config.md` now includes source lines 1113-1127 (Makefile), 1145-1147 (package-lock.json generated section), and 1204-1238 (package.json + vite.config.ts). The 3-line package-lock.json content is fully present in the new file.
+- **DEC-001 status transition**: verified (round 19) → fixing (round 20 start) → closed (round 20 end). All three DEC-001 entries (mimo, deepseek, m3) were updated in `.opencode/loop/open-issues.md` with a one-line `fix-notes:` confirming the split was applied.
+- **Verification**: spot-checked that the 3-line `package-lock.json` content from source lines 1145-1147 is present verbatim in `10-frontend-build-and-config.md`. All 25 sibling files exist. The thin-index at `.opencode/plans/revised-integration-plan.md` exists and references all 25 new files. The split-manifest at `.opencode/loop/notes/split-manifest.md` exists with the audit table. `.opencode/AGENTS.md` references the new file structure. The original source plan content is fully consumed (no orphan content).
+- **Bookkeeping notes**:
+  - The fixer subagent appended a compact entry to `.opencode/loop/fix-log.md` (round 20, splitter subagent).
+  - The fixer subagent did not modify any pre-existing votes or notes in `.opencode/loop/open-issues.md`. Only the three DEC-001 entries' `Status:` field and the three candidate issue entries' notes were appended.
+  - The original source plan content at `.opencode/plans/revised-integration-plan.md` is now the thin-index (~50 lines) instead of the 1416-line full plan. The full content lives in the 25 sibling files.
 
-## Round 18 Summary (post-fix review — deepseek-reviewer)
+## Round 19 Summary (decomposition review — minimax-m3-reviewer)
 
-- **Reviewer**: deepseek-reviewer. Voted **closed-valid** on all 7 `fixed_pending_review` issues.
-- First round-18 voter. Status remained `fixed_pending_review` awaiting majority.
-- **Regressions**: None. No new candidates.
-- Verifications: (1) USR-011 — correct import path; (2) USR-012 — import added; (3) USR-013 — lock acquisition; (4) USR-014 — @types/node retained; (5) USR-015 — schema fields added; (6) USR-016 — test relaxed; (7) USR-017 — contradictions resolved.
+- **Reviewer**: minimax-m3-reviewer. Third and final voter on round 19. Voted **valid** on ISSUE-DEC-001 (the decomposition proposal). Cast concurring **valid** votes on all 3 candidate issues raised by the concurrent reviewers: mimo-reviewer's DEC-002 (line-count estimate off by ~3 lines for `06-service-class.md`), mimo-reviewer's DEC-003 (cross-reference completeness — `19-files-to-delete.md` should include a `**See also:**` pointer to `00-overview-and-architecture.md`), and deepseek-reviewer's DEC-002 (3-line `package-lock.json` section at plan lines 1145-1147 is not in any file's stated line range — splitter must add it to `10-frontend-build-and-config.md`).
+- **Independent full-section coverage check**: re-validated every source-plan line range (1-1416) against the proposal's §4 table. All 25 target files have non-overlapping source line ranges, no source-plan content lines are unassigned, and the `storage/__init__.py` empty-package-init mention is correctly folded into `04-storage.md`. The Create/Modify duplication is cleanly resolved (full spec in Create file, one-line pointer in Modify file). The only structural concern is the package-lock.json gap (deepseek DEC-002).
+- **Cross-reference policy** (§2 of proposal): semantic anchors (no line numbers), 4-6 line header per file, 1-4 most-relevant siblings, `99-index.md` as the complete picture. Workable.
+- **Parent-plan retention** (§3 of proposal): option (b) thin-index replacement of the original is sound. Preserves the path (so root `AGENTS.md` line 29 reference and loop-state references stay valid) and consolidates content in <420-line units.
+- **File count & sizes** (§4 of proposal): 25 files for 1416 lines ≈ 57 lines/file average. Only `06-service-class.md` (~420 lines) slightly exceeds the 400-line target, which the proposal explicitly addresses with a documented sub-split fallback. Acceptable.
+- **Filename conventions** (§5 of proposal): `NN-slug.md` is self-consistent. The optional `.opencode/plans/AGENTS.md` child-DOX bridge (option A in §6 Q1) is the most idiomatic approach given the existing `src/advogado_de_bolso/AGENTS.md` and `tests/AGENTS.md` precedents.
+- **Information-loss risks** (§6 Q7 of proposal): SYSTEM_PROMPT (lines 341-392), `chat_structured` body (lines 548-700), `_truncate_history_to_turns` (lines 828-877), and ISSUE-* tracking table (lines 1349-1403) are all properly identified. The splitter must preserve code-block fences, bullet indentation, and exact ISSUE-* fix wording.
+- **No new candidate issues raised by this reviewer.** Fresh full-section re-scan found no additional missing sections, no additional line-range gaps, no additional size concerns, and no additional cross-reference gaps beyond the 3 already raised by the concurrent reviewers.
+- **Tally: 3/3 valid** on ISSUE-DEC-001 (mimo + deepseek + minimax-m3 unanimous). All 3 candidate issues (DEC-002 line-count, DEC-003 cross-ref, deepseek DEC-002 package-lock) carry 1 valid vote each — they are splitter instructions, not proposal defects, so the 2/3 promotion policy is not required.
+- **Regression check**: No plan-level regression. The proposal is a pure structural split (§6 Q10 of proposal: "The splitter is not asked to fix any content. No ISSUE-* table updates, no new ISSUE-* entries, no editorial changes"). All 60 closed issues remain in scope of their original sections.
 
-## Round 18 Summary (post-fix review — minimax-m3-reviewer)
+## Round 19 Summary (decomposition review — mimo-reviewer)
 
-- **Reviewer**: minimax-m3-reviewer. Voted **closed-valid** on all 7 `fixed_pending_review` issues (ISSUE-USR-011 through ISSUE-USR-017). Third voter; tally is now 3-0 unanimous (mimo + deepseek + minimax-m3). Each fix verified against the plan text:
-  - **USR-011**: Plan line 417 `from pydantic_ai import AgentRunResult` (top-level re-export). Verified empirically in installed pydantic_ai 1.106.0 that `pydantic_ai.tools` raises `ImportError`; `from pydantic_ai` and `from pydantic_ai.run` both succeed. 7-line inline comment at lines 418-424 documents the rationale. ✓
-  - **USR-012**: Plan line 454 `from .agent import _current_style  # noqa: E402  (USR-012)`. 8-line inline comment at lines 444-453 documents the call sites (lines 614/720) and the would-be `NameError`. DS-008 ContextVar scoping test and DS-009 fallback chain preserved. ✓
-  - **USR-013**: Plan lines 807-808 `lock = await self._get_case_lock(case_id); async with lock:` around `cases.load` → validate → `cases.save`. Mirrors `delete_case` pattern at line 768 verbatim. M3-006 reference-counted lock-cleanup invariant preserved (lines 796-800). CLI cross-process safety at line 1029 via atomic `os.replace`. ✓
-  - **USR-014**: Plan line 1184 retains `@types/node` in `devDependencies` with 9-line rationale covering `path`/`__dirname`/`process.env` in `vite.config.ts` and the `tsc --noEmit` lint script. `vite.config.ts` spec at line 1204 cross-references. DS-003 `server.proxy` config preserved unchanged. ✓
-  - **USR-015**: `StructuredChatResponse` schema (line 74) augmented with `updated_at: datetime` and `chat_history: list[ChatMessage]`. `chat_structured` populates both at lines 720-721. `WireResponse = StructuredChatResponse` alias from ISSUE-002 still type-checks (line 75 documents this). Mapper (line 1118) and "server returns full history" claim (line 1224) now backed by the schema. ✓
-  - **USR-016**: Persistence test at lines 1098-1099 now asserts that after JSON round-trip, `ToolReturnPart.content` is a `dict` with matching field values (`data_inicio`, `data_limite`, `dias`, `tipo_prazo`, `base_legal`, `fundamento`), NOT `isinstance(_, DeadlineResult)`. In-memory `tool_plain` test (line 995) continues to assert `isinstance(_, DeadlineResult)`. Complementary, not contradictory. ✓
-  - **USR-017**: Both contradictions resolved. (a) `redigir.py` "Responda APENAS com o texto final" prompt **kept** at line 1135, aligned with Open Decision #1 (line 1236/1297). (b) Empty RAG result is `[]` (lines 1138, 1082, 369-378, 1333). All affected sections (rag.py spec, SYSTEM_PROMPT, test spec, M3-012 tracking row) updated consistently. ✓
-- **Regressions**: None detected. Cross-cutting consistency verified against all 53 closed issues (M3-002/006 lock patterns, M3-014 CASES_PATH alias, DS-003 vite proxy, DS-008 ContextVar, DS-009 fallback chain, DS-010 CLI save shape, ISSUE-002 WireResponse alias, USR-001/002/003/004/005/006/007/008/009/010, IND-001/002/003, M3-001 through M3-019, DS-001 through DS-010) — none re-opened.
-- **New candidates**: 0. Fresh scan found no additional missing imports, no additional Node-API consumers, no internal contradictions, and no structural schema drift. No M3-019+ candidate issues raised.
-- **Status recomputation**: 3/3 closed-valid (mimo + deepseek + minimax-m3 unanimous). All 7 issues remain `closed` (already promoted by 2/3 majority; m3 vote confirms 3-0). Inline `status:` fields are now `closed` for USR-011 through USR-017.
+- **Reviewer**: mimo-reviewer.
+- **Reviewed**: `.opencode/loop/decomposition-proposal.md` — proposed split of 1416-line `revised-integration-plan.md` into 25 content files + 1 index + 1 thin-index replacement.
+- **Validation summary:**
+  - **Coverage**: All source plan sections accounted for. All 1416 lines mapped to 25 files with no gaps or overlaps. Traced every section boundary.
+  - **Line ranges**: Plausible and non-overlapping. Split at line 808 is the natural service.py class-boundary.
+  - **File count**: 25 content + 1 index + 1 replacement = 27 operations. Most files 10–130 lines; one 420-line file (06-service-class.md) acknowledged with sub-split fallback.
+  - **Filenames**: Clear, consistent `NN-slug.md` pattern with descriptive slugs.
+  - **Cross-reference policy**: Semantic anchors (file path + section heading), per-file headers with related-sibling links, no content duplication. Workable and maintainable.
+  - **Parent-plan retention**: Thin-index option (b) correct — preserves original path for existing references (root AGENTS.md File Map, loop-state files) while moving actual content to reviewable units.
+  - **Open questions**: Correctly identifies `.opencode/AGENTS.md` non-existence and recommends `.opencode/plans/AGENTS.md` child DOX (option A). Most idiomatic given existing DOX hierarchy.
+- **Votes cast:**
+  - **ISSUE-DEC-001**: `valid` (proposal as a whole) → promoted to `verified`.
+  - **ISSUE-DEC-002**: `valid` (line-count estimate nit) → stays `candidate` awaiting concurrent reviewer votes.
+  - **ISSUE-DEC-003**: `valid` (cross-reference completeness for 19-files-to-delete.md) → stays `candidate` awaiting concurrent reviewer votes.
+- **Regressions**: None detected in closed issues.
 
-## Round 16 Summary (candidate voting — 3/3 unanimous on 7 USR issues)
+## Round 19 Summary (decomposition review — deepseek-reviewer)
 
-- **Reviewers**: mimo-reviewer (staging + initial vote), deepseek-reviewer (post-staging vote), minimax-m3-reviewer (verification vote). All 3 voted **valid** on all 7 candidate issues (ISSUE-USR-011 through ISSUE-USR-017). Tally: 3-0 unanimous per issue.
-- **Status recomputation**: 3/3 valid → all 7 promoted from `candidate` to `verified` (3-0 unanimous). Inline `status:` fields updated.
-- **Regressions**: None. Regression check traced each USR issue against the 53 closed issues; no re-opens. Cross-cutting consistency preserved.
-- **New candidates**: 0. No ISSUE-M3-020+ candidate issues raised by any reviewer in round 16.
-- **Action required**: Round 17 should be a fix round addressing the 7 verified USR issues. The 2 blockers (USR-011, USR-012) must be resolved before implementation starts; the 4 majors (USR-013 through USR-016) and 1 minor (USR-017) should be fixed in the same round to maintain plan-level consistency.
+- **Reviewer**: deepseek-reviewer. Second voter on round 19. Voted **valid** on ISSUE-DEC-001 (proposal as a whole). Raised 1 minor candidate issue: ISSUE-DEC-002 (3-line `package-lock.json` section at plan lines 1145-1147 is not in any file's stated line range — splitter must add `1145-1147` to the line range for `10-frontend-build-and-config.md`). Coverage, line ranges, file count, filenames, cross-reference policy, and parent-retention all validated. Minor cosmetic numbering inconsistency noted (header says "01- through 23-" but actual listing goes to 24). Non-blocking. Combined with mimo's valid vote, DEC-001 reached 2/3 valid → `verified` status confirmed.
 
-## Round 15 Summary (post-fix review — M3-019 closed)
+## Plan-Level Loop: 60 CLOSED (pre-split) + 1 CLOSED (post-split) + 3 CANDIDATE ADDRESSED
 
-- **Reviewers**: mimo-reviewer, deepseek-reviewer, minimax-m3-reviewer (concurrent). All 3 voted **closed-valid** on the single `fixed_pending_review` issue (ISSUE-M3-019). Tally: 3-0 unanimous.
-- **Status recomputation**: 3/3 `closed-valid` → ISSUE-M3-019 promoted from `fixed_pending_review` to `closed` (unanimous).
-- **Regressions**: None. Round-14 change was a 1-line docs tweak at line 1241 plus 1-line addition at line 1244.
-- **New candidates**: 0 (until round 16's user-supplied batch 2).
-- **Action required**: None at round 15 completion. Plan-level loop was complete with 53 closed issues.
-
-## Plan-Level Loop: 60 CLOSED
-
-The original plan-level implementation-review-fix loop completed with 53 closed issues (rounds 1-15). Round 16 introduced 7 new user-supplied issues, all promoted from `candidate` to `verified`. Round 17 addressed all 7 with plan-level edits; the issues became `fixed_pending_review`. Round 18 post-fix review closed all 7 by 3/3 unanimous vote (mimo + deepseek + minimax-m3). Total: 60 closed issues. Plan ready for implementation.
+The plan-level implementation-review-fix loop completed with 60 closed issues. Round 19 decomposition review validated the split proposal (ISSUE-DEC-001 verified 3-0). Three minor candidate issues (mimo DEC-002, mimo DEC-003, deepseek DEC-002) raised for the splitter to observe. Round 20 splitter subagent applied the decomposition; all 3 candidate instructions were `addressed` per the splitter's notes; DEC-001 transitioned through `fixing` → `closed`. The plan is now split into 25 topic files + 1 thin-index + 1 split-manifest.
 
 ## Next Round
 
-Round 19: The implementation subagent can proceed with the 20-step implementation order (plan lines 1185-1207). All 60 issues are closed. No open issues remain.
+Round 21: implementation subagent begins the 9-step gated implementation order per `.opencode/plans/20-implementation-order.md`. The 21 functional verification scenarios (`.opencode/plans/21-functional-checks.md`) will be run after implementation completes. The plan-level loop is now closed; the next phase is implementation, not further plan review.

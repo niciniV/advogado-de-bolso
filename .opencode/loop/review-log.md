@@ -110,3 +110,64 @@ Post-fix review of 7 fixed_pending_review issues (USR-011 through USR-017) after
 ## Round 18 - mimo-reviewer (post-fix review)
 
 Post-fix review of 7 `fixed_pending_review` issues (ISSUE-USR-011 through ISSUE-USR-017) after round 17 fix. Voted **closed-valid** on all 7. All fixes verified against plan text (1365 lines): (1) USR-011 — `from pydantic_ai import AgentRunResult` at line 417 with 7-line comment; (2) USR-012 — `from .agent import _current_style` at line 454 with 8-line comment; (3) USR-013 — lock acquisition at lines 807-808 mirroring delete_case; (4) USR-014 — `@types/node` retained at line 1184 with 9-line rationale; (5) USR-015 — `updated_at`/`chat_history` added to schema at line 74, populated at lines 720-721; (6) USR-016 — persistence test relaxed to structural field equality at lines 1098-1099; (7) USR-017 — APENAS prompt kept (line 1135), empty RAG result `[]` (line 1138). No regressions from 53 closed issues. No new candidates raised. Tally: 2/3 majority (deepseek + mimo) → all 7 promoted to closed. Total: 60 closed issues, 0 open. Plan ready for implementation.
+
+## Round 19 — deepseek-reviewer (decomposition review)
+
+Decomposition review of .opencode/loop/decomposition-proposal.md (split of 1416-line revised-integration-plan.md into 25+1 files). Voted **valid** on the proposal (ISSUE-DEC-001). Raised ISSUE-DEC-002 (package-lock.json 3-line gap) as a candidate. Proposal is sound: all sections covered, line ranges plausible, file count reasonable, cross-reference policy workable, parent-retention correct. Minor cosmetic numbering inconsistencies noted but non-blocking. Voted alid (ISSUE-DEC-001 → verified). Total: 60 closed + 1 verified (DEC-001) + 1 candidate (DEC-002) = 62 issues.
+## Round 19 - mimo-reviewer (decomposition review)
+
+Reviewed .opencode/loop/decomposition-proposal.md (181 lines) against .opencode/plans/revised-integration-plan.md (1416 lines). Cast vote on ISSUE-DEC-001: **valid**. The proposal is comprehensive and sound: all 1416 lines mapped to 25 files with no gaps or overlaps; file sizes 10-420 lines; cross-reference policy (semantic anchors) is workable; parent-plan retention (thin-index) preserves existing references; naming conventions are consistent. Raised 2 minor candidate issues: ISSUE-DEC-002 (line-count estimate nit for 06-service-class.md - actual range is lines 394-805 = 412 lines, not 420) and ISSUE-DEC-003 (cross-reference completeness for 19-files-to-delete.md - should link to 00-overview-and-architecture.md for deletion rationale). Neither is a blocker. Status: 60 closed + 3 decomposition issues (1 verified DEC-001 + 2 candidate DEC-002/003).
+
+## Round 19 - minimax-m3-reviewer (decomposition review)
+
+Decomposition review of `.opencode/loop/decomposition-proposal.md` (181 lines) against the 1416-line `.opencode/plans/revised-integration-plan.md`. Third and final reviewer in the round-19 decomposition stage. Voted **valid** on ISSUE-DEC-001 (the proposal as a whole). Cast concurring **valid** votes on all 3 candidate issues raised by the other reviewers: mimo-reviewer's ISSUE-DEC-002 (line-count estimate off by ~3 lines for `06-service-class.md` — actual content is 412 source lines + ~5 header lines = ~417, not ~420), mimo-reviewer's ISSUE-DEC-003 (`19-files-to-delete.md` should include a `**See also:**` pointer to `00-overview-and-architecture.md` so the deletion rationale is discoverable from the file in isolation), and deepseek-reviewer's ISSUE-DEC-002 (3-line package-lock.json section at plan lines 1145-1147 is not in any file's stated line range — the splitter MUST add `1145-1147` to the range for `10-frontend-build-and-config.md`).
+
+**Independent full-section coverage check** (proposal §4 table vs. source plan line ranges):
+- Lines 1-22 → `00-overview-and-architecture.md` ✓
+- Lines 25-66 → `01-contracts.md` ✓ (lines 23-24 "## Files to Create" section header implicit context)
+- Lines 67-87 → `02-schemas.md` ✓
+- Lines 88-267 → `03-adapter.md` ✓
+- Lines 269-286 → `04-storage.md` ✓ (includes the `storage/__init__.py` empty package init mention at 269-270)
+- Lines 287-392 → `05-agent-and-system-prompt.md` ✓
+- Lines 394-805 → `06-service-class.md` ✓ (ChatService class only, ending at `get_history`)
+- Lines 808-927 → `07-service-helpers-and-backend.md` ✓ (`_collect_tool_returns`, `_truncate_history_to_turns`, `AgentChatBackend`, `_to_model_messages` removal note, `build_chat_service` notes)
+- Lines 929-996 → `08-api.md` ✓
+- Lines 998-1015 → `09-cli-config-deps.md` ✓
+- Lines 1017-1098 → `15-backend-tests.md` ✓
+- Lines 1100-1111 → `14-frontend-tests.md` ✓ (placed out of source order, which is fine)
+- Lines 1113-1127 + 1145-1147 + 1204-1238 → `10-frontend-build-and-config.md` ✓ (with the deepseek DEC-002 fix to include 1145-1147)
+- Lines 1129-1139 → `12-frontend-api-client.md` ✓
+- Lines 1141-1143 + 1270-1282 → `11-frontend-types-and-defaults.md` ✓
+- Lines 1149-1151 + 1162-1199 + 1283 → `18-frontend-modifications.md` ✓ (pointer-only stub for cross-referenced Modify entries)
+- Lines 1153-1160 → `16-tools-modifications.md` ✓
+- Lines 1011-1012 + 1174-1181 + 1201-1202 → `17-config-and-docs-modifications.md` ✓
+- Lines 1240-1268 + 1276-1277 → `13-frontend-app.md` ✓
+- Lines 1286-1289 → `19-files-to-delete.md` ✓
+- Lines 1293-1305 → `20-implementation-order.md` ✓ (9-step gated order)
+- Lines 1307-1328 → `21-functional-checks.md` ✓ (21 scenarios, 1-21)
+- Lines 1332-1344 → `22-resolved-decisions.md` ✓ (Decisions #1, #2)
+- Lines 1346-1403 → `23-issue-tracking-table.md` ✓ (Decision #3 ISSUE-* table)
+- Lines 1405-1416 → `24-out-of-scope.md` ✓
+- 99-index.md synthesized by the splitter per §3 option (b).
+
+All 25 target files have non-overlapping source line ranges. No source-plan content lines are unassigned. The `storage/__init__.py` empty-package-init mention is folded into `04-storage.md` (line range 269-286). The Create/Modify duplication is resolved by placing the full spec once in the Create file and a one-line pointer in the Modify file. The only structural concern is the package-lock.json gap (deepseek DEC-002), which is a 3-line content fix, not a structural failure.
+
+**Cross-reference policy** (§2 of proposal): semantic anchors (no line numbers), 4-6 line header per file, 1-4 most-relevant siblings, `99-index.md` as the complete picture, no content duplication for cross-referenced items. Workable. The mimo DEC-003 recommendation to add a See-also pointer in `19-files-to-delete.md` is consistent with this policy and improves cross-reference completeness.
+
+**Parent-plan retention** (§3 of proposal): option (b) thin-index replacement of the original is sound. The original path `.opencode/plans/revised-integration-plan.md` is preserved (so the root `AGENTS.md` File Map entry on line 29 and all loop-state references stay valid), the content moves to 25 reviewable units, and the ~20-line landing page provides a one-paragraph summary plus links to all sibling files. This is the correct choice over (a) delete or (c) keep as-is.
+
+**File count & sizes** (§4 of proposal): 25 files for 1416 lines ≈ 57 lines/file average. All files are 10-420 lines. Only `06-service-class.md` (~420 lines) slightly exceeds the 400-line target, which the proposal explicitly addresses with a documented sub-split fallback (lines 511-632 / 548-701 / 722-805). Acceptable — `ChatService` is one logical unit and shouldn't be split arbitrarily.
+
+**Filename conventions** (§5 of proposal): `NN-slug.md` is self-consistent. The proposal correctly notes that this is not the project's existing child-DOX convention (which uses bare filenames in File Maps) but is appropriate for plans (a different document category). The optional `.opencode/plans/AGENTS.md` child-DOX bridge (option A in §6 Q1) is the most idiomatic approach given the existing `src/advogado_de_bolso/AGENTS.md` and `tests/AGENTS.md` precedents.
+
+**Information-loss risks** (§6 Q7 of proposal): SYSTEM_PROMPT (lines 341-392), `chat_structured` body (lines 548-700), `_truncate_history_to_turns` (lines 828-877), and ISSUE-* tracking table (lines 1349-1403) are all properly identified. The splitter must preserve code-block fences, bullet indentation, and exact ISSUE-* fix wording.
+
+**My vote on ISSUE-DEC-001 (the proposal):** **valid**.
+
+**Tally:** 3/3 valid (mimo + deepseek + minimax-m3 unanimous). ISSUE-DEC-001 remains `verified` (already promoted to verified by mimo + deepseek; my third vote confirms 3-0). 3 candidate issues remain (mimo's DEC-002, mimo's DEC-003, deepseek's DEC-002) for the splitter to observe during the split.
+
+**No new candidate issues raised by this reviewer.** Independent full-section re-scan found no additional missing sections, no additional line-range gaps, no additional size concerns, and no additional cross-reference gaps beyond the 3 already raised. The 3-line package-lock.json gap is the only true content omission; the other two are documentation/cross-reference nits.
+
+**Regression check:** No plan-level regression. The proposal is a pure structural split (§6 Q10 of proposal: "The splitter is not asked to fix any content. No ISSUE-* table updates, no new ISSUE-* entries, no editorial changes"). All 60 closed issues remain in scope of their original sections; the split must preserve them verbatim.
+
+**Status:** 60 closed + 1 verified (DEC-001, 3-0 unanimous) + 3 candidate (mimo DEC-002, mimo DEC-003, deepseek DEC-002) = 64 issues. 0 blockers. Plan ready for round 20 splitter subagent.
