@@ -2856,3 +2856,38 @@ Batch 2 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.
 - The `StructuredChatResponse` constructor currently takes no `chat_history` argument from the adapter; the service layer is responsible for overwriting both `chat_history` and `updated_at` before returning to the API caller. The default-factory pattern means a caller that constructs the response directly (without supplying both fields) still gets a valid object (ISSUE-USR-015).
 - The `tool_plain` round-trip test pins only the in-memory `ToolReturnPart.content` shape. The JSON round-trip via `ModelMessagesTypeAdapter.validate_python` degrades typed envelopes to `dict` on reload; that is acknowledged in the adapter docstring and will be pinned at the service layer (per `.opencode/plans/15-backend-tests.md` test_service.py specs).
 
+### Batch 3 — Storage batch (IMPLEMENTED)
+
+- **Status:** implemented
+- **Implementation date:** 2026-06-15
+- **Subagent:** implementation (round 27)
+
+Batch 3 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.md`) is now complete. Per-case JSON persistence is in place: one `{case_id}.json` per case at the configurable `cases_path` (no `_index.json`). The downstream `service.py` rewrite (batch 4) can now inject `Settings.cases_path` and call `load` / `save` / `delete` / `list_all`.
+
+Note: this project uses an alternative batch numbering (1=contracts, 2=schemas+adapter, 3=storage) rather than the literal order in `20-implementation-order.md` (1=contracts, 2=storage, 3=schemas+adapter). The user-defined batch 3 here corresponds to the storage deliverables.
+
+#### Files added
+
+- `src/advogado_de_bolso/storage/__init__.py` — empty package init.
+- `src/advogado_de_bolso/storage/cases.py` — `Case` Pydantic BaseModel plus the four functions `load(case_id, *, cases_path)`, `save(case, *, cases_path)`, `delete(case_id, *, cases_path)`, `list_all(*, cases_path)`. All four take `cases_path: Path` keyword-only (ISSUE-USR-007). Path containment via `_resolve_under` raises `ValueError` on `../../etc/passwd` and `/etc/passwd` (ISSUE-USR-001). Atomic writes use a unique same-directory temp `.{case_id}.{uuid4().hex}.tmp` + `os.replace`, with the temp file cleaned up in `finally` via `contextlib.suppress(OSError)`. `save()` calls `file_path.parent.mkdir(parents=True, exist_ok=True)` (ISSUE-005). `list_all()` derives `last_message` (last assistant `step_content` or `text`, truncated to 80 chars) and `tag_text` (deadline > template_letter > None). Scalability: INFO log at `>500` files, documented `<1000` limit (ISSUE-DS-007). `Case.model_history: list[ModelMessage]` round-trips through Pydantic's `kind` discriminator; `ToolReturnPart.content` degrades to `dict` (ISSUE-USR-016) — pinned by `TestCaseModel::test_round_trip_preserves_model_history_structure`.
+- `src/advogado_de_bolso/storage/AGENTS.md` — new child DOX documenting the `Case` model, the 4 functions, the path-containment invariant, the atomic-write pattern, the `<1000` case scalability constraint, and the relationship to the wire types in `schemas.py`.
+- `tests/test_storage.py` — 29 tests across `TestCaseModel`, `TestLoadSave`, `TestDelete`, `TestListAll`, `TestPathContainment`, `TestAtomicWrite`. Atomic-write coverage uses `unittest.mock.patch("os.replace", spy)` to verify the unique temp-path pattern and the `os.replace` call. Concurrent-saves test tolerates transient `PermissionError` from Windows file-lock contention (last-writer-wins per spec).
+
+#### Files modified
+
+- DOX: `AGENTS.md` (root), `src/advogado_de_bolso/AGENTS.md`, `tests/AGENTS.md` — File Map / Child DOX Index / Test Files / Local Contracts updated to reflect the new storage layer.
+
+#### Gate verification
+
+- `uv run pytest tests/test_storage.py -v` — **29 passed**.
+- `uv run pytest -v` — **216 passed** (29 new + 187 existing; no regressions).
+- `uv run ruff check src/advogado_de_bolso/storage/cases.py tests/test_storage.py` — **All checks passed**.
+- `uv run mypy src/advogado_de_bolso/storage/cases.py tests/test_storage.py` — **Success: no issues found in 2 source files**.
+
+#### Known follow-ups
+
+- `storage/cases.py` is not yet consumed by `service.py` (batch 4). The four functions take `cases_path: Path` keyword-only; the service layer must inject `self._cases_path` (from `Settings.cases_path`, batch 4) on every call.
+- The spec's `<1000`-case scalability constraint is documented but not enforced. Above 1000 cases, `list_all()` latency degrades linearly. The INFO log at `>500` files is a soft warning; an `_index.json` or SQLite-backed store is the upgrade path (per `.opencode/plans/24-out-of-scope.md`).
+- The per-case `asyncio.Lock` is NOT implemented at the storage layer — the spec defers lock management to the service layer. `service.py` (batch 4) will own a lock registry that injects per-case locks; the storage layer's atomic-write pattern is independent of the lock (the lock just serializes callers).
+- On Windows, concurrent saves to the SAME case may race (`os.replace` returns `PermissionError` when the target is in use). The spec acknowledges this as last-writer-wins; the test tolerates the transient error and asserts the final file is valid JSON.
+
