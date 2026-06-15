@@ -92,3 +92,35 @@ Compact chronological log of fixer subagent activities.
   - ISSUE-010 (CLI storage path): USR-007 keeps `./storage/cases/` for both CLI and API; both transports now also pass `cases_path` explicitly.
   - ISSUE-DS-010 (CLI save shape): USR-007 keeps the dual `chat_history` + `model_history` save and now also passes `cases_path=settings.cases_path`.
   - No new regressions introduced.
+
+## Round 11 — general (fixer)
+
+- **Date**: 2026-06-15
+- **Fixer**: general
+- **Scope**: All 3 verified independent-review issues from round 10 (ISSUE-IND-001, ISSUE-IND-002, ISSUE-IND-003).
+- **Summary**: 3 fixed_pending_review, 0 blocked, 0 untouched, tests: n/a (plan-level fixes only).
+- **Files touched**: `.opencode/plans/revised-integration-plan.md` (cross-section edits).
+- **Notable fixes**:
+  - **ISSUE-IND-001 (REVIEW_BLOCKED_MESSAGE import):** plan line 436 import changed to `from .tools.revisor import RevisionResult`. The constant is now defined locally in the new `service.py` spec (right after the import block) with the exact reviewer-blocked UX text from the independent review.
+  - **ISSUE-IND-002 (rename_case dead code):** the `ChatService.rename_case` method was removed (replaced by an explanatory comment in the plan). PATCH endpoint description (line 903) now explicitly notes it serves the rename flow. `apiClient.renameCase` documented (line 1062) as a thin wrapper around `updateCaseMeta({ title })`. `handleRenameCase` note (line 1162) updated. Files to Modify section (line 1085) lists `update_case_meta` only.
+  - **ISSUE-IND-003 (`_to_model_messages` unreachable):** the function was deleted from the plan entirely. Replaced with a comment explaining that `model_history` is always populated on `Case` (initialized to `[]` on creation, appended each turn), making the helper unreachable. The wire `ChatMessage` carries no `ToolCallPart`/`ToolReturnPart` payload, so any wire→model reconstruction would be lossy by design. ISSUE-M3-002's tracking-table row updated to reflect that `_to_model_messages` was removed entirely rather than just spec'd.
+- **Verification**: No tests run. All 3 issues are plan-level fixes (no source code written); `pytest`/`mypy`/`ruff` are not applicable. Future implementation rounds will exercise the plan via the 20-step order.
+- **Regression risk against the 49 already-closed issues**: cross-section consistency verified by inspection.
+  - ISSUE-M3-002 (spec'd `_to_model_messages`): the helper is now removed entirely; the tracking-table row is updated to note this.
+  - ISSUE-M3-003 (reviewer transfer): the constant lives in `service.py` rather than `tools/revisor`, which does not change the call site or the once-per-turn reviewer contract.
+  - ISSUE-M3-008 (`update_case_meta` wiring): the PATCH still delegates to `update_case_meta`; the rename flow is now an explicit PATCH with `{ title }` body, consistent with the body shape introduced in ISSUE-USR-005.
+  - ISSUE-USR-005 (API contract): the PATCH endpoint remains the single metadata-update surface; the rename flow is now documented as a PATCH-with-`{ title }` wrapper.
+  - No new regressions introduced.
+- **Bookkeeping note**: the fixer subagent returned an empty response in chat but did edit the plan correctly. The orchestrator updated the issue statuses in `.opencode/loop/open-issues.md` (`verified` → `fixed_pending_review`) and appended this fix-log entry. The plan content is consistent with the fix notes in the open-issues entries.
+
+## Round 14 — general (fixer)
+
+- **Date**: 2026-06-15
+- **Fixer**: general
+- **Scope**: 1 verified docs-drift issue from round 13 (ISSUE-M3-019).
+- **Summary**: 1 fixed_pending_review, 0 blocked, 51 untouched, tests: n/a (plan-level fixes only).
+- **Files touched**: `.opencode/plans/revised-integration-plan.md` (1-line text change in the "Resolved Open Decisions" section at line 1241).
+- **Notable fixes**:
+  - **ISSUE-M3-019 (docs drift in "Resolved Open Decisions"):** changed the PUT vs PATCH entry from `RenameCaseRequest { title }` to `UpdateCaseRequest { title?, icon_name?, response_style? }` (with parenthetical that a single-field rename is `UpdateCaseRequest { title }`). Added the historical-rename note documenting the ISSUE-USR-005 expansion. The rest of the plan (line 81, 903) was already correct; only the "Resolved Open Decisions" section was stale.
+- **Verification**: No tests run. The fix is a 1-line plan text change with no functional impact; `pytest`/`mypy`/`ruff` are not applicable.
+- **Regression risk against the 52 already-closed issues**: low. The edit is confined to the "Resolved Open Decisions" historical-record section. No helper signatures, no schema names, no endpoint shapes, no test cases changed. The 51 untouched closed issues are unaffected.

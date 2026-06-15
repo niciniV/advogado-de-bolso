@@ -1631,4 +1631,289 @@ None.
 
 **Summary**: 10/10 closed-valid (3/3 unanimous). All 49 issues now CLOSED. No new candidates. No regressions. Plan ready for implementation.
 
+---
+
+## Candidate Issues (Round 10 — independent-review, mimo-reviewer staging)
+
+### ISSUE-IND-001 [blocker] REVIEW_BLOCKED_MESSAGE imported from non-existent module
+- status: closed
+- originating-reviewer: independent-review
+- affected: .opencode/plans/revised-integration-plan.md (line 436), src/advogado_de_bolso/service.py (planned)
+- description: The plan's `service.py` code imports `REVIEW_BLOCKED_MESSAGE` from `.tools.revisor`:
+
+```python
+from .tools.revisor import REVIEW_BLOCKED_MESSAGE, RevisionResult
+```
+
+However, `REVIEW_BLOCKED_MESSAGE` does **not** exist in `src/advogado_de_bolso/tools/revisor.py`. It is defined locally in the current `src/advogado_de_bolso/service.py` (lines 21-24). Implementing the plan exactly as written would produce an `ImportError: cannot import name 'REVIEW_BLOCKED_MESSAGE' from 'advogado_de_bolso.tools.revisor'` on first import.
+- mimo-reviewer: valid — ImportError at runtime; constant is defined in service.py:21-24, not in tools/revisor.py.
+- deepseek-reviewer: valid — Confirmed by reading tools/revisor.py (154 lines): no REVIEW_BLOCKED_MESSAGE anywhere. Defined at service.py:21-24. Plan line 436 import will raise ImportError.
+- minimax-m3-reviewer: valid — Confirmed `src/advogado_de_bolso/tools/revisor.py` exports only `RevisionResult` (line 63); `REVIEW_BLOCKED_MESSAGE` lives at `service.py:21-25`. Plan line 436 would raise ImportError on first import of the rewritten `service.py`. 2/3 valid → verified.
+- fix-notes: Plan line 436 import changed to `from .tools.revisor import RevisionResult`; `REVIEW_BLOCKED_MESSAGE` defined locally in the new `service.py` spec section (right after the import block) with the exact reviewer-blocked UX text.
+- affected-files: .opencode/plans/revised-integration-plan.md (lines 436, 437-449)
+
+### ISSUE-IND-002 [minor] ChatService.rename_case is dead code
+- status: closed
+- originating-reviewer: independent-review
+- affected: .opencode/plans/revised-integration-plan.md (line 717), src/advogado_de_bolso/service.py (planned), base_frontend/src/api.ts (planned)
+- description: The plan specifies `ChatService.rename_case(self, case_id: str, new_title: str) -> Case` with full load/save logic. However, the API endpoint list shows only one case-update endpoint:
+
+- `PATCH /api/cases/{case_id}` (body: `UpdateCaseRequest { title?, icon_name?, response_style? }`) → delegates to `ChatService.update_case_meta`
+
+No dedicated `POST /api/cases/{case_id}/rename` or similar endpoint exists. The frontend's `handleRenameCase` calls `apiClient.renameCase(caseId, newTitle)`, but the `api.ts` spec does not show a dedicated rename endpoint either. The most natural mapping is that `renameCase` on the client wraps a `PATCH` with `{ title: newTitle }`, which calls `update_case_meta`, not `rename_case`.
+
+As a result, `rename_case` is never invoked by any planned endpoint or client method.
+- mimo-reviewer: valid — No endpoint or client caller references rename_case; update_case_meta handles the PATCH; rename_case is orphaned dead code.
+- deepseek-reviewer: valid — Confirmed by tracing all call sites: no endpoint, no test, no frontend spec references rename_case. PATCH delegates to update_case_meta (line 898). rename_case (line 717) is orphaned.
+- minimax-m3-reviewer: valid — Confirmed: plan line 898 explicitly states PATCH delegates to `update_case_meta`; plan line 1153 collapses the frontend to a single `updateCaseMeta` call. `rename_case` (plan line 717) is unreachable from any endpoint or client method. 2/3 valid → verified.
+- fix-notes: `ChatService.rename_case` method removed (replaced with an explanatory comment in the plan). The PATCH endpoint description (line 903) explicitly notes it serves the rename flow. `apiClient.renameCase` documented (line 1062) as a thin wrapper around `updateCaseMeta({ title })`. `handleRenameCase` note (line 1162) updated. Files to Modify section (line 1085) lists `update_case_meta` only.
+- affected-files: .opencode/plans/revised-integration-plan.md (lines 717-741, 903, 1062, 1085, 1162)
+
+### ISSUE-IND-003 [minor] _to_model_messages defined but never called
+- status: closed
+- originating-reviewer: independent-review
+- affected: .opencode/plans/revised-integration-plan.md (line 839), src/advogado_de_bolso/service.py (planned)
+- description: `_to_model_messages(chat_history: list[ChatMessage]) -> list[ModelMessage]` is defined with a detailed docstring explaining it is a "fallback when `model_history` is empty." However, no code path in the plan actually calls it:
+
+- `chat_structured` (the only history consumer) uses `_truncate_history_to_turns(case.model_history, ...)` directly (line ~587).
+- New cases initialize `model_history=[]` (line 582), which is an empty list — but the backend receives it directly as `llm_history`, not via `_to_model_messages`.
+- Legacy migration scenarios (cases with `chat_history` but empty `model_history`) are never handled by an explicit branch.
+- The test rewrite section (`tests/test_service.py`) does not mention exercising `_to_model_messages`.
+
+The function is effectively unreachable. It was added as part of ISSUE-M3-002 ("Spec'd `_collect_tool_returns` and `_to_model_messages` in service.py"), but only `_collect_tool_returns` has a caller (line 634).
+- mimo-reviewer: valid — chat_structured uses model_history directly; _to_model_messages has zero call sites in any code path.
+- deepseek-reviewer: valid — Confirmed by tracing chat_structured (lines 560-704): uses _truncate_history_to_turns(case.model_history, ...) directly. _to_model_messages has zero call sites. No legacy migration branch exists.
+- minimax-m3-reviewer: valid — Verified via grep: only occurrence in plan is the definition at line 839; docstring claims fallback role (line 845-848) but no call site exists in `chat_structured` or any helper. Either add an explicit fallback branch (line 614 region) or remove the function. 2/3 valid → verified.
+- fix-notes: `_to_model_messages` function deleted from the plan; replaced with an explanatory comment noting that `model_history` is always populated on `Case` (initialized to `[]` on creation, appended each turn), making the helper unreachable. ISSUE-M3-002's tracking-table row updated to reflect that `_to_model_messages` was removed entirely rather than just spec'd.
+- affected-files: .opencode/plans/revised-integration-plan.md (lines 839-867 deleted, tracking-table row for M3-002 updated)
+
+---
+
+### mimo-reviewer — Post-Fix Review Votes (Round 12)
+
+I re-read the plan (1290 lines) and verified each ISSUE-IND-* fix against the current plan text and source code. All 3 fixes are adequate. No regressions detected from the 49 previously-closed issues.
+
+#### Votes on fixed_pending_review issues
+
+- **ISSUE-IND-001 (REVIEW_BLOCKED_MESSAGE imported from non-existent module):** **closed-valid**. Plan import (line 436) is now `from .tools.revisor import RevisionResult` — no `REVIEW_BLOCKED_MESSAGE`. The constant is defined locally at lines 448-452 with a 7-line inline comment (lines 440-447) explaining the rationale. Current source code confirms: `tools/revisor.py` has no `REVIEW_BLOCKED_MESSAGE`; `service.py:21` defines it locally. The plan fix matches the actual codebase. Import would have been `ImportError` at runtime. Fixed. ✓
+
+- **ISSUE-IND-002 (ChatService.rename_case is dead code):** **closed-valid**. `rename_case` method removed and replaced with a comment block (lines 731-739) explaining the rationale. The PATCH endpoint description (line 903) explicitly states it serves the rename flow via `update_case_meta`. Frontend spec (line 1062) documents `renameCase` as a thin `updateCaseMeta({ title })` wrapper. Files to Modify section (line 1085) lists the removal. grep confirms no `rename_case` method definition remains in the plan. Dead code eliminated. ✓
+
+- **ISSUE-IND-003 (_to_model_messages defined but never called):** **closed-valid**. Function replaced with a 12-line explanatory comment block (lines 853-864) documenting why it was removed: `model_history` is always populated on `Case` (initialized to `[]` at line 596, appended at line 688), so the helper was unreachable by design. The tracking table for ISSUE-M3-002 (line 1261) was updated to reflect the removal. grep confirms no `_to_model_messages` function definition remains. Dead code eliminated with clear rationale. ✓
+
+#### Regression check
+
+No regressions detected from round 11 fixes. Cross-cutting consistency verified:
+
+- **ISSUE-M3-001 (model_history):** IND-003 removes unreachable helper; `model_history` persistence is untouched (always populated). ✓
+- **ISSUE-M3-002 (_collect_tool_returns):** Only `_to_model_messages` removed; `_collect_tool_returns` spec intact. ✓
+- **ISSUE-M3-003 (reviewer transfer):** IND-001 constant relocation is orthogonal; reviewer called by ChatService only. ✓
+- **ISSUE-M3-008/USR-005 (update_case_meta/PATCH):** IND-002 removes competing `rename_case`; single PATCH surface consistent. ✓
+- **ISSUE-USR-006 (Case import):** Unchanged. ✓
+- All other 44 closed issues: No impact from IND fixes. ✓
+
+#### New candidate issues
+
+None.
+
+#### Status (individual votes, round 12)
+
+| Issue | mimo (this round) | deepseek (this round) | Tally | New status |
+|-------|-------------------|----------------------|-------|------------|
+| ISSUE-IND-001 | closed-valid | closed-valid | 2-0 | closed (majority) |
+| ISSUE-IND-002 | closed-valid | closed-valid | 2-0 | closed (majority) |
+| ISSUE-IND-003 | closed-valid | closed-valid | 2-0 | closed (majority) |
+
+**Summary**: 3/3 closed-valid. Combined with deepseek's 3 closed-valid votes, all 3 reach 2/3 majority → closed. No regressions. No new candidates. Minimax vote (if received later) cannot reverse majority-closed status.
+
+---
+
+### deepseek-reviewer — Post-Fix Review Votes (Round 12)
+
+I re-read the plan (1290 lines) and verified each ISSUE-IND-* fix against the current plan text and source code. All 3 fixes are adequate. No regressions detected from the 49 previously-closed issues.
+
+#### Votes on fixed_pending_review issues
+
+- **ISSUE-IND-001 (REVIEW_BLOCKED_MESSAGE imported from non-existent module):** **closed-valid**. Plan shows the corrected approach: import is `from .tools.revisor import RevisionResult` (line 436) and `REVIEW_BLOCKED_MESSAGE` is defined locally (lines 448-452) with an inline comment (lines 440-447) documenting the rationale. Current `src/advogado_de_bolso/tools/revisor.py` (read and verified) has no `REVIEW_BLOCKED_MESSAGE` — only `RevisionResult` at line 63. The fix resolves the `ImportError`. ✓
+
+- **ISSUE-IND-002 (ChatService.rename_case is dead code):** **closed-valid**. `rename_case` method removed; replaced with a comment (lines 731-739). PATCH endpoint (line 903) explicitly serves the rename flow via `update_case_meta`. `apiClient.renameCase` (line 1062) is a thin wrapper around `updateCaseMeta({ title })`. `handleRenameCase` (line 1162) follows the same path. Files to Modify section (line 1085) lists only `update_case_meta`. No orphaned method remains. ✓
+
+- **ISSUE-IND-003 (_to_model_messages defined but never called):** **closed-valid**. `_to_model_messages` function removed entirely. Replaced with a comment block (lines 853-865) explaining the rationale: `model_history` is always populated on `Case` (line 582 init, line 674 append), making the helper unreachable by design. `Empty list is a valid input to `_truncate_history_to_turns` (returns `[]`). ISSUE-M3-002 tracking-table row (line 1261) updated to reflect removal. No dead code remains. ✓
+
+#### Regression check
+
+No regressions detected from round 11 fixes. Verified against all 49 closed issues:
+
+- **ISSUE-M3-001 (model_history):** IND-003 removal doesn't touch `model_history` persistence — always populated. ✓
+- **ISSUE-M3-002 (_collect_tool_returns):** IND-003 removes only unreachable `_to_model_messages`; `_collect_tool_returns` spec intact. ✓
+- **ISSUE-M3-003 (reviewer transfer):** IND-001 constant location change is orthogonal; reviewer called by ChatService only once per turn. ✓
+- **ISSUE-M3-008/USR-005 (update_case_meta/PATCH):** IND-002 removes competing `rename_case`; PATCH surface is consistent single-metadata endpoint. ✓
+- **ISSUE-USR-006 (Case import):** Unchanged — `Case` still from `storage.cases`. ✓
+- All other 44 closed issues: No impact from IND fixes. ✓
+
+#### New candidate issues
+
+None. All cross-cutting consistency verified across the full 1290-line plan.
+
+#### Status (individual votes, round 12)
+
+| Issue | deepseek (this round) | Tally | Status recommendation |
+|-------|----------------------|-------|-----------------------|
+| ISSUE-IND-001 | closed-valid | 1-0 | Awaiting majority (needs 2nd reviewer) |
+| ISSUE-IND-002 | closed-valid | 1-0 | Awaiting majority (needs 2nd reviewer) |
+| ISSUE-IND-003 | closed-valid | 1-0 | Awaiting majority (needs 2nd reviewer) |
+
+**Summary**: 3/3 closed-valid. No reopen, no unclear. No regressions. No new candidates. Inline `status:` fields remain `fixed_pending_review` (awaiting majority from concurrent reviewers).
+
+---
+
+### minimax-m3-reviewer — Post-Fix Review Votes (Round 12)
+
+I re-read the plan (1296 lines after the round-11 edits) and the relevant source files (`src/advogado_de_bolso/service.py`, `src/advogado_de_bolso/tools/revisor.py`) to verify each ISSUE-IND-* fix. All 3 fixes are adequate. One cross-cutting consistency drift detected (raised as ISSUE-M3-019 below).
+
+#### Votes on fixed_pending_review issues
+
+- **ISSUE-IND-001 (REVIEW_BLOCKED_MESSAGE imported from non-existent module):** **closed-valid**. Plan import line 436 is now `from .tools.revisor import RevisionResult` — no `REVIEW_BLOCKED_MESSAGE`. The constant is defined locally in the new `service.py` spec at lines 448-452 with a 7-line explanatory comment (lines 440-447) citing the original `ImportError`. Source verification: `src/advogado_de_bolso/tools/revisor.py` (154 lines, re-read) exports only `RevisionResult` (line 63) and `review_response`/`revisar_resposta`; no `REVIEW_BLOCKED_MESSAGE` constant. Current `src/advogado_de_bolso/service.py:21-25` defines the same constant locally with the same UX text. Plan fix matches the actual codebase and would not raise `ImportError`. The fix is complete and self-consistent (line 641 `blocked_message = REVIEW_BLOCKED_MESSAGE if blocked else None` references the locally-defined name). ✓
+
+- **ISSUE-IND-002 (ChatService.rename_case is dead code):** **closed-valid**. The `rename_case` method body (plan lines 717-728 in pre-round-11) is replaced with an 8-line explanatory comment block (lines 731-739) that documents why the method was removed: the PATCH endpoint already delegates to `update_case_meta`, so a single-field rename is just `update_case_meta(case_id, title=new_title)`. Cross-section consistency verified: (a) PATCH endpoint description (line 903) now explicitly states it serves the rename flow; (b) `base_frontend/src/api.ts` spec (line 1062) documents `renameCase` as a thin wrapper around `updateCaseMeta({ title: newTitle })`; (c) `handleRenameCase` (line 1162) has a comment explaining the same; (d) Files to Modify section (line 1085) drops `rename_case` from the add-list. grep on the plan: only references to `rename_case` are in comments explaining removal (lines 731, 738, 903, 1085). No orphan method definition. The fix is complete and cross-section consistent. ✓
+
+- **ISSUE-IND-003 (_to_model_messages defined but never called):** **closed-valid**. The `_to_model_messages` function (plan lines 839-867 in pre-round-11) is replaced with a 12-line explanatory comment block (lines 853-865) that documents why the helper was removed: `model_history` is always populated on `Case` (initialized to `[]` at line 596, appended at line 688), so the helper was unreachable by design. The comment also notes that empty list is a valid input to `_truncate_history_to_turns` (returns `[]`), so no special-case branch is needed. ISSUE-M3-002 tracking-table row (line 1261) was updated to reflect that `_to_model_messages` was removed entirely. grep on the plan: only references are in the explanatory comment and the M3-002 tracking row. The fix is complete. ✓
+
+#### Regression check
+
+Cross-cutting consistency checked against the 49 closed issues:
+
+- **ISSUE-M3-001 (model_history persistence):** Unchanged. `chat_structured` (line 627-628) still uses `_truncate_history_to_turns(case.model_history, ...)` directly. ✓
+- **ISSUE-M3-002 (_collect_tool_returns spec):** Unchanged. `_collect_tool_returns` defined at line 781, called at line 648. Only `_to_model_messages` was removed. ✓
+- **ISSUE-M3-003 (reviewer transfer):** Unchanged. `AgentChatBackend.run()` is reviewer-free; `chat_structured` (line 639) calls `self._reviewer(...)` exactly once per turn. ✓
+- **ISSUE-M3-008 / ISSUE-USR-005 (update_case_meta / PATCH):** Unchanged. PATCH endpoint (line 903) delegates to `update_case_meta`. ✓
+- **ISSUE-USR-006 (Case import):** Unchanged. Line 433: `from .storage.cases import Case`. ✓
+- **ISSUE-USR-007 (cases_path threading):** Unchanged. ✓
+- All other 43 closed issues: No impact from the three IND fixes. ✓
+
+#### New candidate issues
+
+**ISSUE-M3-019 [minor] "Resolved Open Decisions" section still references `RenameCaseRequest`** (docs drift)
+
+- **Status:** candidate
+- **originating-reviewer:** minimax-m3-reviewer
+- **affected:** `.opencode/plans/revised-integration-plan.md` (line 1241)
+- **description:** The "Resolved Open Decisions" section (plan line 1232-1287) has an entry "PUT vs PATCH for rename — RESOLVED: PATCH only" that states:
+
+  > One endpoint: `PATCH /api/cases/{case_id}` with `RenameCaseRequest { title }`.
+
+  However, the actual PATCH body has since evolved (per ISSUE-USR-005) from `RenameCaseRequest { title }` to `UpdateCaseRequest { title?, icon_name?, response_style? }`. The "Resolved Open Decisions" entry describes the historical state at the time of the original decision and was not updated when the body was changed. The endpoint list (line 903) and the PATCH body spec (line 81) correctly say `UpdateCaseRequest`; the "Resolved Open Decisions" section is now inconsistent with the rest of the plan.
+
+  This is a documentation drift, not a functional defect. The implementation instructions elsewhere in the plan are correct. But a future implementer reading line 1241 in isolation would think the PATCH body is `RenameCaseRequest { title }`, which is wrong (and would have been the dead-code path the IND-002 fix removed).
+
+  **Fix:** Update line 1241 to read: "One endpoint: `PATCH /api/cases/{case_id}` with `UpdateCaseRequest { title?, icon_name?, response_style? }` (a single-field rename is just `UpdateCaseRequest { title }`)." Optionally add a one-line note: "Originally specified as `RenameCaseRequest { title }`; expanded to `UpdateCaseRequest` per ISSUE-USR-005 to also carry `icon_name` and `response_style` in the same PATCH."
+
+- **affected-files:** .opencode/plans/revised-integration-plan.md (line 1241)
+- **Severity:** minor
+- **Category:** docs
+
+#### Status (individual votes, round 12 — minimax-m3-reviewer)
+
+| Issue | mimo | deepseek | m3 (this round) | Tally | New status |
+|-------|------|----------|-----------------|-------|------------|
+| ISSUE-IND-001 | closed-valid | closed-valid | closed-valid | 3-0 | closed (unanimous) |
+| ISSUE-IND-002 | closed-valid | closed-valid | closed-valid | 3-0 | closed (unanimous) |
+| ISSUE-IND-003 | closed-valid | closed-valid | closed-valid | 3-0 | closed (unanimous) |
+
+**Summary**: 3/3 closed-valid (unanimous 3-0). No reopen, no unclear. All three `fixed_pending_review` issues from round 10 reach majority + unanimity → status `closed`. ISSUE-M3-019 raised as a new candidate (docs drift in "Resolved Open Decisions" line 1241). The 49 previously-closed issues remain closed; no functional regressions detected.
+
+---
+
+## Candidate Issues (Round 12 — minimax-m3-reviewer post-fix review)
+
+### ISSUE-M3-019 [minor] "Resolved Open Decisions" section still references `RenameCaseRequest`
+- status: closed
+- fix-notes: Plan: updated the "PUT vs PATCH for rename" entry in the "Resolved Open Decisions" section (plan line 1241) from `RenameCaseRequest { title }` to `UpdateCaseRequest { title?, icon_name?, response_style? }` (with a parenthetical that a single-field rename is just `UpdateCaseRequest { title }`). Added the optional one-line note documenting the historical rename to `UpdateCaseRequest` per ISSUE-USR-005. The rest of the plan (line 81, 903) was already correct; only the "Resolved Open Decisions" section was stale.
+- affected-files: .opencode/plans/revised-integration-plan.md
+- originating-reviewer: minimax-m3-reviewer (round 12, post-fix review)
+- affected: .opencode/plans/revised-integration-plan.md (line 1241)
+- description: The "Resolved Open Decisions" section (plan line 1232-1287) has an entry "PUT vs PATCH for rename — RESOLVED: PATCH only" that states:
+
+  > One endpoint: `PATCH /api/cases/{case_id}` with `RenameCaseRequest { title }`.
+
+  However, the actual PATCH body has since evolved (per ISSUE-USR-005) from `RenameCaseRequest { title }` to `UpdateCaseRequest { title?, icon_name?, response_style? }`. The "Resolved Open Decisions" entry describes the historical state at the time of the original decision and was not updated when the body was changed. The endpoint list (line 903) and the PATCH body spec (line 81) correctly say `UpdateCaseRequest`; the "Resolved Open Decisions" section is now inconsistent with the rest of the plan.
+
+  This is a documentation drift, not a functional defect. The implementation instructions elsewhere in the plan are correct. But a future implementer reading line 1241 in isolation would think the PATCH body is `RenameCaseRequest { title }`, which is wrong (and would have been the dead-code path the ISSUE-IND-002 fix removed).
+
+  **Fix:** Update line 1241 to read: "One endpoint: `PATCH /api/cases/{case_id}` with `UpdateCaseRequest { title?, icon_name?, response_style? }` (a single-field rename is just `UpdateCaseRequest { title }`)." Optionally add a one-line note: "Originally specified as `RenameCaseRequest { title }`; expanded to `UpdateCaseRequest` per ISSUE-USR-005 to also carry `icon_name` and `response_style` in the same PATCH."
+
+- mimo-reviewer: **valid** (round 13) — Plan line 1241 says `RenameCaseRequest { title }` but lines 80-81 correctly deprecate `RenameCaseRequest` in favor of `UpdateCaseRequest { title?, icon_name?, response_style? }`. Line 903 (endpoint list) and line 749 (adapter comment) both correctly reference `UpdateCaseRequest`. Only line 1241 (Resolved Open Decisions section) is stale. Confirmed via grep: 5 remaining `RenameCaseRequest` references, 4 are historical/DEPRECATED context; line 1241 is the sole unqualified stale reference. Docs drift, not functional.
+- deepseek-reviewer: valid — plan line 1241 says `RenameCaseRequest { title }` while lines 80-81 and 903 consistently use `UpdateCaseRequest { title?, icon_name?, response_style? }`. Genuine docs drift; the Resolved Open Decisions section was not updated when USR-005 expanded the schema.
+- minimax-m3-reviewer: **valid** (round 13) — I raised this in round 12 and re-confirmed against plan line 1241: it still says `RenameCaseRequest { title }` while the rest of the plan (line 81, 903) and the ISSUE-USR-005 fix all use `UpdateCaseRequest { title?, icon_name?, response_style? }`. Pure docs drift; trivial one-line fix.
+- affected-files: .opencode/plans/revised-integration-plan.md (line 1241)
+- Severity: minor
+- Category: docs
+
+## Post-Fix Review Votes (Round 15 — mimo-reviewer)
+
+### Vote on ISSUE-M3-019
+
+- **ISSUE-M3-019 (Resolved Open Decisions stale RenameCaseRequest):** **closed-valid**. Re-read plan line 1241: now reads `UpdateCaseRequest { title?, icon_name?, response_style? }` with parenthetical "(a single-field rename is just `UpdateCaseRequest { title }`)". Line 1244 documents historical rename per ISSUE-USR-005. Grep confirmed: 11 `UpdateCaseRequest` references across the plan; `RenameCaseRequest` appears only in historical/DEPRECATED context (lines 80, 750). All sections consistent. ✓
+- **ISSUE-M3-019 (deepseek-reviewer, round 15):** **closed-valid**. Independently verified plan line 1241: now reads `UpdateCaseRequest { title?, icon_name?, response_style? }` with historical ISSUE-USR-005 note. Grep on plan found 5 `RenameCaseRequest` references: 4 are historical/DEPRECATED context (lines 80, 81 deprecation note, 750, 903); line 1244 is the fixer-added historical note. The fix exactly matches the round-13 specification. All sections internally consistent. No regressions from 52 closed issues. ✓
+
+### Status recomputation
+
+- **ISSUE-M3-019**: 2/3 `closed-valid` (mimo + deepseek). **Majority reached → status promoted to `closed`**. Remaining vote (minimax-m3) optional.
+
+### Regression check
+
+No regressions detected across the 52 previously-closed issues. The plan is internally consistent. No new candidate issues raised.
+
+---
+
+## Post-Fix Review Votes (Round 15 — minimax-m3-reviewer)
+
+### Vote on ISSUE-M3-019
+
+- **ISSUE-M3-019 (Resolved Open Decisions stale RenameCaseRequest):** **closed-valid**. Re-read the plan's "Resolved Open Decisions" section (plan line 1241) and the round-14 fix notes. Plan line 1241 now reads:
+
+  > One endpoint: `PATCH /api/cases/{case_id}` with `UpdateCaseRequest { title?, icon_name?, response_style? }` (a single-field rename is just `UpdateCaseRequest { title }`).
+
+  And line 1244 adds the historical note:
+
+  > Originally specified as `RenameCaseRequest { title }`; expanded to `UpdateCaseRequest` per ISSUE-USR-005 to also carry `icon_name` and `response_style` in the same PATCH.
+
+  This is exactly the fix specified in round 12. Independent verification:
+  - The PATCH endpoint spec (plan line 903) and the PATCH body spec (line 81) consistently use `UpdateCaseRequest { title?, icon_name?, response_style? }`.
+  - The remaining `RenameCaseRequest` references are all intentional: line 80 marks it `DEPRECATED`, lines 749-750 / 903 are explanatory comments noting the migration, line 1244 is the new historical note. None are stale.
+  - The adapter comment (line 749) and the frontend spec (line 1159) both reference `UpdateCaseRequest`. No downstream drift introduced by the fix.
+  - Cross-section consistency preserved: no inconsistency between line 1241 (now updated) and the rest of the plan.
+
+  This is a clean docs-drift fix with no functional impact. Approved.
+
+### Status recomputation (round 15 — all 3 reviewers)
+
+| Issue | mimo | deepseek | m3 (this) | Tally | New status |
+|-------|------|----------|-----------|-------|------------|
+| ISSUE-M3-019 | closed-valid | closed-valid | closed-valid | 3-0 (unanimous) | closed |
+
+**Summary**: 3/3 `closed-valid` (unanimous). No reopen, no unclear. ISSUE-M3-019 promoted from `fixed_pending_review` to `closed`. Total: 53 closed issues (49 prior + IND-001/002/003 + M3-019), 0 verified, 0 fixed_pending_review, 0 candidate, 0 rejected, 0 blocked.
+
+### Regression check (round 15 — minimax-m3-reviewer)
+
+Re-validated all 52 previously-closed issues against the plan after the round-14 docs-drift fix. The round-14 change was a 1-line text edit at line 1241 plus a 1-line addition at line 1244 — both are pure documentation tweaks that touch only the "Resolved Open Decisions" section. No source code, no test contracts, no Pydantic schemas, no API contracts, no storage layout, no config wiring, no agent system prompt, no review-log structure, no Dox hierarchy.
+
+Spot-checks performed (deterministic, scope-limited):
+- **Plan line 81**: `UpdateCaseRequest { title?, icon_name?, response_style? }` — DEPRECATED note for `RenameCaseRequest` is intact. ✓
+- **Plan line 903**: PATCH endpoint spec references `UpdateCaseRequest` (not `RenameCaseRequest`). ✓
+- **Plan line 1241**: Now correctly references `UpdateCaseRequest { title?, icon_name?, response_style? }`. ✓
+- **Plan line 1244**: New historical note about ISSUE-USR-005 migration. ✓
+- **`src/` Python source**: no implementation files exist (plan-level loop). ✓
+- **`base_frontend/src/` TypeScript source**: no implementation files exist. ✓
+- **No new inconsistencies introduced** by the fix: all other plan sections that reference the PATCH body (lines 16, 81, 429, 749-750, 903, 1031, 1159) are consistent with the new `UpdateCaseRequest` schema.
+
+**Result**: Zero regressions from 52 previously-closed issues. No new candidate issues raised. The plan remains ready for the 20-step implementation order (lines 1179-1203).
+
+### File-write coordination note
+
+- Re-read `.opencode/loop/open-issues.md` and `.opencode/loop/orchestration-state.md` immediately before each edit to avoid overwriting concurrent mimo/deepseek writes.
+- Did not modify any pre-existing votes or notes from mimo, deepseek, or earlier rounds. Appended this round-15 m3 section at the end of the file (after the mimo+deepseek round-15 section).
+- Updated the inline `status:` field for ISSUE-M3-019 from `fixed_pending_review` to `closed` (majority of 2+ `closed-valid` reached with mimo + deepseek; my 3rd vote confirms unanimous closure).
+- Will append a compact entry to `review-log.md` and update `orchestration-state.md` with the m3 round-15 snapshot.
+
 

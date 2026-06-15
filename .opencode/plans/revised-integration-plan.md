@@ -433,9 +433,23 @@ from .schemas import (
 from .storage.cases import Case
 from .storage import cases
 from .adapter import extract_structured_response
-from .tools.revisor import REVIEW_BLOCKED_MESSAGE, RevisionResult
+from .tools.revisor import RevisionResult
 
 logger = logging.getLogger(__name__)
+
+# ISSUE-IND-001: `REVIEW_BLOCKED_MESSAGE` is defined locally in `service.py`
+# rather than imported from `.tools.revisor`. The constant is tightly coupled
+# to the service layer's reviewer-blocking behavior and has no reason to live
+# in `tools.revisor` (which only exports `RevisionResult` and the
+# `review_response` callable). Importing it from `tools.revisor` would raise
+# `ImportError: cannot import name 'REVIEW_BLOCKED_MESSAGE' from
+# 'advogado_de_bolso.tools.revisor'` at import time. The text matches the
+# reviewer-blocked UX message already in use at `service.py:21-25`.
+REVIEW_BLOCKED_MESSAGE = (
+    "Nao foi possivel validar esta resposta com seguranca. "
+    "Tente reformular a pergunta ou procure o PROCON, a Defensoria Publica "
+    "ou um advogado de confianca."
+)
 
 # ISSUE-DS-001: `_now()` is defined at module scope (was previously referenced
 # without a definition — would have caused NameError on first chat).
@@ -714,15 +728,15 @@ class ChatService:
         # ISSUE-USR-007: thread cases_path through to `cases.load`.
         return cases.load(case_id, cases_path=self._cases_path)
 
-    async def rename_case(self, case_id: str, new_title: str) -> Case:
-        # ISSUE-USR-007: load/save with the configured cases_path.
-        case = cases.load(case_id, cases_path=self._cases_path)
-        if case is None:
-            raise KeyError(case_id)
-        case.title = new_title
-        case.updated_at = _now()
-        cases.save(case, cases_path=self._cases_path)
-        return case
+    # ISSUE-IND-002: a dedicated `rename_case` method was removed. The old
+    # `PATCH /api/cases/{case_id}` wiring (USR-005) already delegates to
+    # `update_case_meta`, so a single-field rename is just
+    # `update_case_meta(case_id, title=new_title)`. The frontend
+    # `apiClient.renameCase` is collapsed into a thin PATCH wrapper around
+    # `updateCaseMeta({ title: newTitle })` (see `base_frontend/src/api.ts`
+    # spec and `handleRenameCase` in `App.tsx`). Keeping a separate
+    # `rename_case` would be dead code on the server side and a divergence
+    # between the two call paths the frontend could take.
 
     async def update_case_meta(
         self, case_id: str, **fields: Any
@@ -836,27 +850,18 @@ def _truncate_history_to_turns(
     return out
 
 
-def _to_model_messages(chat_history: list[ChatMessage]) -> list[ModelMessage]:
-    """Convert a wire `ChatMessage` list to a `ModelMessage` list.
-
-    ISSUE-M3-002: spec'd because the plan referenced it without
-    definition. The wire `ChatMessage` carries NO `ToolCallPart`/
-    `ToolReturnPart` payload, so this conversion is lossy by design.
-    With `model_history` persisted on `Case` (ISSUE-M3-001), this function
-    is now ONLY used as a fallback when `model_history` is empty (e.g.,
-    for a brand-new case, or for cases migrated from the old in-memory
-    session model).
-    """
-    out: list[ModelMessage] = []
-    for m in chat_history:
-        if m.sender == "user":
-            out.append(ModelRequest(parts=[UserPromptPart(content=m.text)]))
-        else:
-            # Assistant messages: emit a `ModelResponse` with a single
-            # `TextPart` for the prose body. Tool calls/results from
-            # earlier turns are NOT recoverable from the wire form.
-            out.append(ModelResponse(parts=[TextPart(content=m.text)]))
-    return out
+# ISSUE-IND-003: `_to_model_messages(chat_history) -> list[ModelMessage]`
+# (previously spec'd here as a fallback when `model_history` was empty) is
+# removed. `model_history` is ALWAYS populated on `Case` — initialized to
+# `[]` on first creation (line 582) and appended on every subsequent turn
+# (line 674). Empty list is a valid input to `_truncate_history_to_turns`
+# (returns `[]`), so the helper was effectively unreachable. Defining it
+# here as a "fallback" was misleading: no code path in the plan ever
+# branched to it. The wire `ChatMessage` carries no `ToolCallPart`/
+# `ToolReturnPart` payload, so any wire→model reconstruction would be
+# lossy by design — better to surface "no LLM history yet" as the empty
+# list it actually is. A future legacy-migration helper (if ever needed)
+# would live in `storage/cases.py` alongside the migration shim, not here.
 ```
 
 The `_backend` protocol stays as a simple `run(message, history) -> (prose, history)` (ISSUE-M3-003). The reviewer is called by `ChatService` exactly once per turn; the backend does not run it.
@@ -895,7 +900,7 @@ Major rewrite. Drop `/api/chat` and `/api/sessions`. Add the new case endpoints.
 - `POST /api/chat/structured` (body: `StructuredChatRequest`) → `StructuredChatResponse` (200) **or** `{"blocked": true, "blocked_message": "..."}` (422) on reviewer block.
 - `GET /api/cases` → `list[CaseSummary]`
 - `GET /api/cases/{case_id}` → `CaseResponse` (added per ISSUE-USR-005 — required by tests and the frontend `handleSelectCase` flow, which was previously undocumented in the endpoint list). Delegates to `ChatService.get_case(case_id)`.
-- `PATCH /api/cases/{case_id}` (body: `UpdateCaseRequest`) → `CaseResponse`. Delegates to `ChatService.update_case_meta` (ISSUE-M3-008 + ISSUE-USR-005) so per-field validation lives in the service. The body uses `UpdateCaseRequest { title?, icon_name?, response_style? }`, not the old `RenameCaseRequest { title }`.
+- `PATCH /api/cases/{case_id}` (body: `UpdateCaseRequest`) → `CaseResponse`. Delegates to `ChatService.update_case_meta` (ISSUE-M3-008 + ISSUE-USR-005) so per-field validation lives in the service. The body uses `UpdateCaseRequest { title?, icon_name?, response_style? }`, not the old `RenameCaseRequest { title }`. **This endpoint also serves the rename flow** (ISSUE-IND-002): the frontend's `apiClient.renameCase(caseId, newTitle)` is a thin client-side wrapper that calls `apiClient.updateCaseMeta(caseId, { title: newTitle })`, which issues a PATCH with `{ title }` to this same endpoint. There is no dedicated `rename_case` method on `ChatService`; the PATCH endpoint is the single metadata-update surface.
 - `DELETE /api/cases/{case_id}` → 204
 - `GET /api/cases/{case_id}/history` → `list[ChatMessage]`
 - `GET /api/health` (kept)
@@ -1054,6 +1059,7 @@ Thin HTTP client + snake↔camel mapper:
 - `mapStructuredResponse(payload, sessionId): ChatMessage` — maps the server response to a UI `ChatMessage`, sets `tagText` from `deadline`/`templateLetter` truthiness, derives `date` from `updated_at` ("Hoje" | "Ontem" | "DD MMM").
 - `mapCaseSummary(payload): Case` — maps `CaseSummary` to UI `Case`, derives `date` from `updated_at`.
 - `chatStructured`, `listCases`, `getCase`, `renameCase`, `deleteCase`, `getHistory`.
+- `renameCase(caseId, newTitle)` (ISSUE-IND-002) is a **thin wrapper** around `updateCaseMeta(caseId, { title: newTitle })`: it PATCHes `/api/cases/{case_id}` with `{ title: newTitle }` and the server-side `update_case_meta` does the work. There is no dedicated `renameCase` REST endpoint; the PATCH is the single metadata-update surface. `handleRenameCase` in `App.tsx` calls this wrapper.
 
 ### `base_frontend/src/defaults.ts` (new)
 - `initialPreferences` (moved from `App.tsx`).
@@ -1076,7 +1082,7 @@ Return `list[KnowledgeChunk]`. Preserve the "fonte desconhecida" fallback. Prese
 See "Files to Create" section above. Add `@agent.instructions` callback. Update `SYSTEM_PROMPT` to describe the new tool return shapes. Add `STYLE_PROMPTS` and `_current_style` ContextVar.
 
 ### `src/advogado_de_bolso/service.py`
-See "Files to Create" section above. Drop `chat`, `clear_session`, `session_history`, `session_count`, `_max_sessions`, `_evict_old_sessions`, `_max_history_messages`. Add `chat_structured`, `list_cases`, `get_case`, `rename_case`, `update_case_meta`, `delete_case`, `get_history`. Add per-case `asyncio.Lock` registry. Add `StructuredChatResponse` dataclass (renamed from `ChatReply`). 20-turn cap on LLM-bound history.
+See "Files to Create" section above. Drop `chat`, `clear_session`, `session_history`, `session_count`, `_max_sessions`, `_evict_old_sessions`, `_max_history_messages`. Add `chat_structured`, `list_cases`, `get_case`, `update_case_meta`, `delete_case`, `get_history` (`rename_case` removed per ISSUE-IND-002 — the PATCH endpoint delegates to `update_case_meta`, and a single-field rename is just `update_case_meta(case_id, title=new_title)`). Add per-case `asyncio.Lock` registry. Add `StructuredChatResponse` dataclass (renamed from `ChatReply`). 20-turn cap on LLM-bound history.
 
 ### `src/advogado_de_bolso/api.py`
 See "Files to Create" section above. Drop the old endpoints. Add the new ones. Use explicit SPA fallback. Return 422 for blocked.
@@ -1153,7 +1159,7 @@ import { seedCases, initialPreferences } from "./defaults";
   - Sends a single `PATCH /api/cases/{case_id}` with the new `UpdateCaseRequest` body `{ title?, icon_name?, response_style? }` (ISSUE-USR-005). The `apiClient` exposes one `updateCaseMeta(caseId, fields)` method that accepts a partial `UpdateCaseRequest` payload; the client omits unset fields. The previous two-call approach (`renameCase` + `updateCaseMeta`) is collapsed into one call.
 - `handleSelectCase` → `apiClient.getCase(caseId)`.
 - `handleDeleteCase` → `apiClient.deleteCase(caseId)`.
-- `handleRenameCase` → `apiClient.renameCase(caseId, newTitle)`.
+- `handleRenameCase` → `apiClient.renameCase(caseId, newTitle)`, which under the hood calls `apiClient.updateCaseMeta(caseId, { title: newTitle })` and issues `PATCH /api/cases/{case_id}` with `{ title }` (ISSUE-IND-002). There is no dedicated `renameCase` REST endpoint; the frontend rename is a PATCH with a `{ title }` body.
 - The `history` field in the request body is removed (server is now the source of truth; the server returns the full chat history with each response).
 - Filter out `is_demo` cases when the first real case is created (clear them from local state, never re-add).
 
@@ -1232,9 +1238,10 @@ Do not move to step N+1 until step N's tests are green.
 - **Contract test** in `test_adapter.py`: a redigir turn produces `structured.template_letter == doc.texto`.
 
 ### 2. `PUT` vs `PATCH` for rename — **RESOLVED: PATCH only**
-- One endpoint: `PATCH /api/cases/{case_id}` with `RenameCaseRequest { title }`.
+- One endpoint: `PATCH /api/cases/{case_id}` with `UpdateCaseRequest { title?, icon_name?, response_style? }` (a single-field rename is just `UpdateCaseRequest { title }`).
 - REST-correct (partial update).
 - The Open Decision "PUT for full replacement" is deferred until there's a UI consumer for it.
+- Originally specified as `RenameCaseRequest { title }`; expanded to `UpdateCaseRequest` per ISSUE-USR-005 to also carry `icon_name` and `response_style` in the same PATCH.
 
 ### 3. Plan-level fixes applied (round 3 of the implementation-review-fix loop)
 The following reviewer issues were applied directly to this plan. Each is referenced in the section it touches. See `.opencode/loop/open-issues.md` for full context.
@@ -1252,7 +1259,7 @@ The following reviewer issues were applied directly to this plan. Each is refere
 | ISSUE-010 | CLI writes to `./storage/cases/` (same as API). |
 | ISSUE-011 | Full merged `SYSTEM_PROMPT` provided (replaced bullet excerpts). |
 | ISSUE-M3-001 | Added `model_history: list[ModelMessage]` to `Case`. |
-| ISSUE-M3-002 | Spec'd `_collect_tool_returns` and `_to_model_messages` in service.py. |
+| ISSUE-M3-002 | Spec'd `_collect_tool_returns` in service.py; `_to_model_messages` removed entirely (ISSUE-IND-003) because no caller materialized — `model_history` is always populated on `Case`. |
 | ISSUE-M3-003 | Refactored `AgentChatBackend` shown without reviewer; `ChatService` runs reviewer exactly once. |
 | ISSUE-M3-004 | Full `package.json` rewrite spec'd (dev/build/start/clean + dep removal). |
 | ISSUE-M3-005 | `is_demo` documented as frontend-only marker. |
