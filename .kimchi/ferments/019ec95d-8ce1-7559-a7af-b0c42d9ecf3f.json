@@ -1,0 +1,164 @@
+{
+  "id": "019ec95d-8ce1-7559-a7af-b0c42d9ecf3f",
+  "name": "Review Integration Plan Issues",
+  "description": "Review the plan at .opencode/plans for any issues",
+  "status": "running",
+  "worktree": {
+    "path": "/mnt/c/Users/Vitor/Desktop/Vinicius/Projetos/advogado-de-bolso",
+    "branch": "main",
+    "commit": "7345bfbb3de19fb9c3c66999f530a4340b70c733"
+  },
+  "scoping": {
+    "goal": {
+      "answer": "Produce an independent review of .opencode/plans/revised-integration-plan.md to identify residual issues the automated reviewer loop missed, and verify that the 49 previously-closed fixes remain correctly present in the current plan text.",
+      "confirmedAt": "2026-06-15T04:05:15.208Z"
+    },
+    "criteria": {
+      "answer": "A written review document is produced identifying issues in .opencode/plans/revised-integration-plan.md not already tracked in .opencode/loop/open-issues.md, saved to a persistent project file.\nEach identified issue references the exact plan section/line and includes a severity classification (blocker/major/minor), description, and concrete fix recommendation.\nA spot-check verification is performed on at least 3 previously-closed issues to confirm their fixes are still present and correct in the current plan text.\nThe review covers cross-section consistency (e.g., imports, type references, endpoint-to-method mappings) that automated reviewers may have missed.\nIf no new issues are found, the review document explicitly states 'No new issues identified' and documents the spot-check results.",
+      "confirmedAt": "2026-06-15T04:05:15.208Z"
+    },
+    "constraints": {
+      "answer": "Do not duplicate issues already tracked in .opencode/loop/open-issues.md., Use targeted reads only (do not read entire source files end-to-end)., Validate findings against actual source code where possible., Write all findings to files, not chat.",
+      "confirmedAt": "2026-06-15T04:05:15.208Z"
+    },
+    "phases": {
+      "answer": "Plan Inspection & Review Document",
+      "confirmedAt": "2026-06-15T04:05:15.208Z"
+    },
+    "assumptions": {
+      "answer": "The automated reviewer loop completed 9 rounds and closed 49 issues.; The plan claims readiness for implementation but may contain residual defects.; Python 3.11+ with Pydantic AI 1.106+ is the target environment.; @agent.instructions is a real Pydantic AI decorator (verified against installed package).",
+      "confirmedAt": "2026-06-15T04:05:15.208Z"
+    }
+  },
+  "phases": [
+    {
+      "id": "phase-1",
+      "index": 1,
+      "name": "Plan Inspection & Review Document",
+      "goal": "Read the plan and existing issue files, identify new issues via targeted inspection, spot-check previously-closed fixes, and write the review output.",
+      "description": "",
+      "parallel": false,
+      "status": "active",
+      "steps": [
+        {
+          "id": "step-1",
+          "index": 1,
+          "description": "Read .opencode/loop/open-issues.md to establish the known-issue baseline and avoid duplication.",
+          "status": "verified",
+          "verification": {
+            "command": "wc -l .opencode/loop/open-issues.md | grep -q '[0-9]'",
+            "retries": 2,
+            "retryDelayMs": 1000
+          },
+          "parallel": false,
+          "startedAt": "2026-06-15T04:05:48.875Z",
+          "completedAt": "2026-06-15T04:06:40.895Z",
+          "result": {
+            "success": true,
+            "exitCode": 0,
+            "stdout": "",
+            "stderr": "",
+            "completedAt": "2026-06-15T04:06:40.895Z"
+          }
+        },
+        {
+          "id": "step-2",
+          "index": 2,
+          "description": "Target-read plan sections for import/type/dead-code inconsistencies (contracts.py imports, service.py imports, dead methods, unreachable helpers).",
+          "status": "verified",
+          "verification": {
+            "command": "grep -n 'from .tools.revisor import REVIEW_BLOCKED_MESSAGE' .opencode/plans/revised-integration-plan.md; grep -n 'rename_case' .opencode/plans/revised-integration-plan.md; grep -n '_to_model_messages' .opencode/plans/revised-integration-plan.md",
+            "retries": 2,
+            "retryDelayMs": 1000
+          },
+          "parallel": false,
+          "startedAt": "2026-06-15T04:06:59.709Z",
+          "completedAt": "2026-06-15T04:08:47.582Z",
+          "result": {
+            "success": true,
+            "exitCode": 0,
+            "stdout": "",
+            "stderr": "",
+            "completedAt": "2026-06-15T04:08:47.582Z"
+          }
+        },
+        {
+          "id": "step-3",
+          "index": 3,
+          "description": "Spot-check 3 previously-closed issues in the current plan text to confirm fixes are present (e.g., REACT_DIST path, empty-prose fallback, model_history field).",
+          "status": "verified",
+          "verification": {
+            "command": "grep -n 'parent.parent.parent' .opencode/plans/revised-integration-plan.md; grep -n 'Análise inicial' .opencode/plans/revised-integration-plan.md; grep -n 'model_history' .opencode/plans/revised-integration-plan.md",
+            "retries": 2,
+            "retryDelayMs": 1000
+          },
+          "parallel": false,
+          "startedAt": "2026-06-15T04:09:04.938Z",
+          "completedAt": "2026-06-15T04:09:56.381Z",
+          "result": {
+            "success": true,
+            "exitCode": 0,
+            "stdout": "",
+            "stderr": "",
+            "completedAt": "2026-06-15T04:09:56.381Z"
+          }
+        },
+        {
+          "id": "step-4",
+          "index": 4,
+          "description": "Write the review document to .opencode/loop/new-review-issues.md with findings, severity, and fix recommendations.",
+          "status": "verified",
+          "verification": {
+            "command": "test -f .opencode/loop/new-review-issues.md && test -s .opencode/loop/new-review-issues.md",
+            "retries": 2,
+            "retryDelayMs": 1000
+          },
+          "parallel": false,
+          "startedAt": "2026-06-15T04:10:47.360Z",
+          "completedAt": "2026-06-15T04:12:58.378Z",
+          "result": {
+            "success": true,
+            "exitCode": 0,
+            "stdout": "",
+            "stderr": "",
+            "completedAt": "2026-06-15T04:12:58.378Z"
+          }
+        },
+        {
+          "id": "step-5",
+          "index": 5,
+          "description": "Append a compact spot-check entry to .opencode/loop/review-log.md.",
+          "status": "running",
+          "verification": {
+            "command": "grep -q 'spot-check' .opencode/loop/review-log.md",
+            "retries": 2,
+            "retryDelayMs": 1000
+          },
+          "parallel": false,
+          "startedAt": "2026-06-15T04:13:18.243Z"
+        }
+      ],
+      "startedAt": "2026-06-15T04:05:32.012Z"
+    }
+  ],
+  "decisions": [],
+  "memories": [],
+  "createdAt": "2026-06-15T03:40:11.873Z",
+  "updatedAt": "2026-06-15T04:13:18.243Z",
+  "goal": "Produce an independent review of .opencode/plans/revised-integration-plan.md to identify residual issues the automated reviewer loop missed, and verify that the 49 previously-closed fixes remain correctly present in the current plan text.",
+  "successCriteria": [
+    "A written review document is produced identifying issues in .opencode/plans/revised-integration-plan.md not already tracked in .opencode/loop/open-issues.md, saved to a persistent project file.",
+    "Each identified issue references the exact plan section/line and includes a severity classification (blocker/major/minor), description, and concrete fix recommendation.",
+    "A spot-check verification is performed on at least 3 previously-closed issues to confirm their fixes are still present and correct in the current plan text.",
+    "The review covers cross-section consistency (e.g., imports, type references, endpoint-to-method mappings) that automated reviewers may have missed.",
+    "If no new issues are found, the review document explicitly states 'No new issues identified' and documents the spot-check results."
+  ],
+  "constraints": [
+    "Do not duplicate issues already tracked in .opencode/loop/open-issues.md.",
+    "Use targeted reads only (do not read entire source files end-to-end).",
+    "Validate findings against actual source code where possible.",
+    "Write all findings to files, not chat."
+  ],
+  "lastActiveAt": "2026-06-15T04:05:32.012Z",
+  "activePhaseId": "phase-1"
+}

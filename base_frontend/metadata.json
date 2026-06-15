@@ -1,0 +1,6 @@
+{
+  "name": "Advogado de Bolso",
+  "description": "Seu assistente jurídico inteligente para o Código de Defesa do Consumidor. Calcule prazos de arrependimento, redija contestações e tire suas dúvidas jurídicas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
