@@ -3069,3 +3069,51 @@ Three failures on initial entry to the batch were fixed before any new code was 
 - The integration tests stub `globalThis.fetch` and verify request shape; once the FastAPI server has a test harness (no plans yet), an end-to-end suite against a real or in-process server would be the next step.
 - `base_frontend/dist/` is rebuilt on every `npm run build`; the FastAPI server's `REACT_DIST` static mount (see `src/advogado_de_bolso/api.py`) will pick it up on the next server restart.
 
+## Implementation Notes  -> Batch 8 (Operations/docs)
+
+Batch 8 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.md`) is now complete. Operations/docs: a `Makefile` at the repo root wraps the recurring dev/build commands, and `README.md` is rewritten to document the structured chat endpoint, the case-management CRUD endpoints, the React + Vite + Vitest frontend, the disk-persistence semantics (per-case JSON files in `./storage/cases/`, `<1000` case scalability limit, `--workers 1` requirement, last-writer-wins on concurrent API + CLI writes), the four `make` targets, the `CASES_PATH` env var, and the frontend quality gates. No source code (`src/advogado_de_bolso/*` or `base_frontend/src/*.ts*`) is touched in this batch.
+
+- **Implementation date:** 2026-06-16
+
+### Files added (batch 8)
+
+- `Makefile` (11 lines) - Four tab-indented targets: `frontend` (`cd base_frontend && npm ci && npm run build`), `dev-api` (`uv run --cache-dir .uv-cache advogado-api`), `dev-frontend` (`cd base_frontend && npm run dev`), and `dev` (`$(MAKE) -j2 dev-api dev-frontend`). The `frontend` target uses `npm ci` (not `npm install`) so the committed `package-lock.json` (batch 6) makes the install reproducible. All recipe lines use POSIX-required TAB indentation (verified via raw byte inspection: every line after a target header starts with `0x09`).
+
+### Files modified (batch 8)
+
+- `README.md` (rewritten, 161 -> 207 lines) - Replaces the pre-batch-4 in-memory-session story with the new endpoint set, wire examples, persistence semantics, and frontend section. Concretely:
+  - **Endpoints table** now lists `GET /api/health`, `POST /api/chat/structured`, `GET /api/cases`, `GET /api/cases/{case_id}` (UUID), `PATCH /api/cases/{case_id}` (UUID), `DELETE /api/cases/{case_id}` (UUID, 204), `GET /api/cases/{case_id}/history` (UUID), and `GET /docs`. The old `POST /api/chat` and `DELETE /api/sessions/{session_id}` rows are gone.
+  - **Wire example** uses the `StructuredChatRequest`/`StructuredChatResponse` shape: request body `{message, session_id, response_style, title?, icon_name?}`; 200 response with full `StructuredChatResponse` envelope (`session_id`, `updated_at`, `chat_history`, `step_title`, `step_content`, `relevant_title`, `relevant_content`, `deadline`, `questions`, `suggestive_text`, `template_letter`, `quick_replies`); 422 blocked envelope (`{session_id, updated_at, chat_history, blocked: true, blocked_message}`). CRUD examples cover PATCH (200 / 404 / 422) and DELETE (204 / 404) with the UUID-typed path params.
+  - **Frontend section** replaces the old `src/advogado_de_bolso/frontend` reference with the React + Vite + TypeScript SPA at `base_frontend/`, documents the Vite dev-server proxy (`/api/*` -> `http://localhost:8000` per `base_frontend/vite.config.ts`), the parallel `make dev` workflow, and the production mount (`base_frontend/dist/` served by FastAPI on :8000 via the `REACT_DIST` static mount in `api.py`).
+  - **Persistence section** documents the per-case JSON layout, the `CASES_PATH` env var override, the `<1000` case scalability limit (ISSUE-DS-007), the `--workers 1` requirement (per-case `asyncio.Lock` is in-process), and the last-writer-wins semantics for concurrent API + CLI writes (atomic `os.replace` prevents torn JSON but not cross-process lost updates).
+  - **Comandos Make section** adds a table describing `frontend`, `dev-api`, `dev-frontend`, and `dev`.
+  - **Configuracao table** adds a `CASES_PATH` row (default `./storage/cases`).
+  - **Qualidade section** adds the four frontend gates (`npm ci`, `npm run test`, `npm run lint`, `npm run build`) alongside the existing backend gates. The note about backend tests using a fake service (no LLM call, no embedding download) is retained.
+- `AGENTS.md` (root) - File Map gains two new rows: `Makefile` (NEW batch 8, with target list) and `README.md` (UPDATED batch 8, with what the rewrite covers). The Project Overview paragraph is extended with the batch 8 sentence + verification log line.
+
+### Files NOT modified (deferred to batch 9)
+
+- Backend source files (`src/advogado_de_bolso/*.py`) and tests (`tests/test_*.py`) - untouched. The batch 9 final gate is the only consumer that runs the full pytest + ruff + mypy suite.
+- `base_frontend/` source and config - untouched. The lockfile (batch 6) and the rewritten `package.json` (batch 6) plus the App/api refactor (batch 7) are stable.
+- `HANDOFF.md` and `.opencode/agents/*.md` - left out of this commit (the task says "Do NOT commit `HANDOFF.md`, `.opencode/agents/*`"). The `.opencode/AGENTS.md` File Map has a pending uncommitted modification adding two new agent rows; this is also left out of the batch 8 commit.
+
+### Gate verification (batch 8)
+
+- `cd base_frontend && npm run test` - **23/23 pass** (`src/api.test.ts` 15 + `src/App.test.tsx` 8). 0 skipped, 0 failed.
+- `cd base_frontend && npm run lint` (`tsc --noEmit`) - **passes** (no output = success). The `tsconfig.json` `types: ["vitest/globals", "@testing-library/jest-dom"]` and the `exclude: ["server.ts"]` (now a no-op after the batch 7 deletion) keep the type-check clean.
+- `cd base_frontend && npm run build` (`vite build`) - **passes.** 1679 modules transformed; `dist/index.html` (0.41 kB), `dist/assets/index-CHZYQSCy.css` (31.44 kB), `dist/assets/index-np8Mnw6N.js` (253.76 kB); built in 2.35s. The FastAPI server's `REACT_DIST` static mount picks up the new bundle on the next restart.
+- `Get-Content Makefile -Encoding ASCII | Select-String "\`t"` - **all 4 recipe lines match** (the four target bodies are tab-indented; the `dev:` target is also tab-indented as required by POSIX make).
+- `Get-Content Makefile -Encoding ASCII | Format-Hex` - **all 4 command lines start with byte `0x09`** (TAB). The first bytes of each recipe line: `09 63 64` (cd), `09 75 76` (uv), `09 63 64` (cd), `09 24 28` ($(MAKE)).
+- Backend gates (`uv run pytest`, `uv run ruff check src/ tests/`, `uv run mypy src/`) - **SKIPPED.** These require the `.venv` to be set up with `uv sync --extra dev --cache-dir .uv-cache` and, in the case of mypy / the full pytest run, no live model credentials. Per the task spec ("If `uv` is not available, skip backend gates too - but document what was skipped"), backend gates are deferred to batch 9 (the final gate).
+
+### Plan spec deviations (batch 8)
+
+- The `dev-api` target uses `uv run --cache-dir .uv-cache advogado-api` (matches the existing `Inicio rapido` invocation in the previous README, and matches the `uv 0.8.11` setup used during the integration loop). The plan spec at `.opencode/plans/10-frontend-build-and-config.md` lists plain `uv run advogado-api`; the cache-dir form is what the project has been using throughout the gated batches and is documented in `.env.example` / `pyproject.toml` setup steps, so the cached form is kept for consistency.
+- `README.md` is 207 lines (vs ~161 in the pre-batch-8 state). The growth is driven by the larger endpoints table, the structured wire examples, the persistence section with deployment caveats, the Make targets table, and the dual-backend / dual-frontend quality-gates block. The plan did not pin a target line count.
+
+### Known follow-ups (batch 8 -> batch 9)
+
+- The final gate (batch 9) is the only remaining step. It runs the full backend suite (`uv run pytest`, `uv run ruff check src/ tests/`, `uv run mypy src/`) plus the four frontend gates from this batch. The Makefile `frontend` target was verified to chain `npm ci && npm run build` correctly; the lockfile (batch 6) makes the install reproducible across machines.
+- `tsconfig.json` `exclude: ["server.ts"]` is now a no-op (file deleted in batch 7); it can be removed in a future cleanup commit.
+- The `HANDOFF.md` and `.opencode/agents/*.md` files in the working tree are left uncommitted; if the user wants them tracked, that is a separate commit.
+
