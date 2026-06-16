@@ -6,6 +6,13 @@ interface web responsiva e busca em uma base local de documentos.
 > A aplicacao oferece informacao geral. Ela nao substitui orientacao juridica
 > individualizada de advogado, Defensoria Publica, PROCON ou outro orgao competente.
 
+> **Atencao:** o diretorio `data/raw` nao e distribuido com o repositorio. Antes de
+> executar a aplicacao, voce deve adicionar seus proprios documentos (PDF, HTML,
+> Markdown ou TXT) nesse diretorio — por exemplo, a Lei 8.078/90 (CDC), o Decreto
+> 2.181/97 e outras normas consumeristas — e rodar `uv run python -m advogado_de_bolso.ingest`
+> para construir o indice de busca. Sem esse passo, a ferramenta de RAG nao tera
+> base documental para consultar.
+
 ## Inicio rapido
 
 Requisitos: Python 3.11 ou superior, [uv](https://docs.astral.sh/uv/),
@@ -108,6 +115,22 @@ rotas de primeira camada diferentes de `api` e `assets`).
 
 Qualquer frontend pode substituir o incluido desde que respeite o mesmo
 contrato HTTP descrito em `Endpoints`.
+
+### Demonstracao visual
+
+As capturas abaixo foram geradas a partir da interface real servida pela API
+FastAPI. O video usa uma edicao curta do fluxo real: a espera da resposta da IA
+foi removida na pos-producao para manter a demonstracao fluida.
+
+[![Video de demonstracao do Advogado de Bolso](docs/assets/captures/demo-video-preview.png)](docs/assets/advogado-de-bolso-demo.mp4)
+
+[Assistir ou baixar o video de demonstracao (MP4)](docs/assets/advogado-de-bolso-demo.mp4)
+
+![Painel inicial do Advogado de Bolso](docs/assets/captures/01-home-dashboard.png)
+
+![Resposta estruturada do assistente](docs/assets/captures/03-real-answer.png)
+
+![Lista de casos persistidos](docs/assets/captures/05-cases-list.png)
 
 ### Endpoints
 
