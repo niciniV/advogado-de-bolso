@@ -3081,7 +3081,7 @@ Batch 8 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.
 
 ### Files modified (batch 8)
 
-- `README.md` (rewritten, 161 -> 207 lines) - Replaces the pre-batch-4 in-memory-session story with the new endpoint set, wire examples, persistence semantics, and frontend section. Concretely:
+- `README.md` (rewritten, 161 -> 270 lines) - Replaces the pre-batch-4 in-memory-session story with the new endpoint set, wire examples, persistence semantics, and frontend section. Concretely:
   - **Endpoints table** now lists `GET /api/health`, `POST /api/chat/structured`, `GET /api/cases`, `GET /api/cases/{case_id}` (UUID), `PATCH /api/cases/{case_id}` (UUID), `DELETE /api/cases/{case_id}` (UUID, 204), `GET /api/cases/{case_id}/history` (UUID), and `GET /docs`. The old `POST /api/chat` and `DELETE /api/sessions/{session_id}` rows are gone.
   - **Wire example** uses the `StructuredChatRequest`/`StructuredChatResponse` shape: request body `{message, session_id, response_style, title?, icon_name?}`; 200 response with full `StructuredChatResponse` envelope (`session_id`, `updated_at`, `chat_history`, `step_title`, `step_content`, `relevant_title`, `relevant_content`, `deadline`, `questions`, `suggestive_text`, `template_letter`, `quick_replies`); 422 blocked envelope (`{session_id, updated_at, chat_history, blocked: true, blocked_message}`). CRUD examples cover PATCH (200 / 404 / 422) and DELETE (204 / 404) with the UUID-typed path params.
   - **Frontend section** replaces the old `src/advogado_de_bolso/frontend` reference with the React + Vite + TypeScript SPA at `base_frontend/`, documents the Vite dev-server proxy (`/api/*` -> `http://localhost:8000` per `base_frontend/vite.config.ts`), the parallel `make dev` workflow, and the production mount (`base_frontend/dist/` served by FastAPI on :8000 via the `REACT_DIST` static mount in `api.py`).
@@ -3099,17 +3099,17 @@ Batch 8 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.
 
 ### Gate verification (batch 8)
 
-- `cd base_frontend && npm run test` - **23/23 pass** (`src/api.test.ts` 15 + `src/App.test.tsx` 8). 0 skipped, 0 failed.
+- `cd base_frontend && npm run test` - **27/27 pass** (`src/api.test.ts` 15 + `src/App.test.tsx` 12). 0 skipped, 0 failed.
 - `cd base_frontend && npm run lint` (`tsc --noEmit`) - **passes** (no output = success). The `tsconfig.json` `types: ["vitest/globals", "@testing-library/jest-dom"]` and the `exclude: ["server.ts"]` (now a no-op after the batch 7 deletion) keep the type-check clean.
-- `cd base_frontend && npm run build` (`vite build`) - **passes.** 1679 modules transformed; `dist/index.html` (0.41 kB), `dist/assets/index-CHZYQSCy.css` (31.44 kB), `dist/assets/index-np8Mnw6N.js` (253.76 kB); built in 2.35s. The FastAPI server's `REACT_DIST` static mount picks up the new bundle on the next restart.
+- `cd base_frontend && npm run build` (`vite build`) - **passes.** 1679 modules transformed; `dist/index.html` (0.41 kB) plus the bundle and CSS written to `dist/assets/`; built in 2.35s. The FastAPI server's `REACT_DIST` static mount picks up the new bundle on the next restart.
 - `Get-Content Makefile -Encoding ASCII | Select-String "\`t"` - **all 4 recipe lines match** (the four target bodies are tab-indented; the `dev:` target is also tab-indented as required by POSIX make).
 - `Get-Content Makefile -Encoding ASCII | Format-Hex` - **all 4 command lines start with byte `0x09`** (TAB). The first bytes of each recipe line: `09 63 64` (cd), `09 75 76` (uv), `09 63 64` (cd), `09 24 28` ($(MAKE)).
-- Backend gates (`uv run pytest`, `uv run ruff check src/ tests/`, `uv run mypy src/`) - **SKIPPED.** These require the `.venv` to be set up with `uv sync --extra dev --cache-dir .uv-cache` and, in the case of mypy / the full pytest run, no live model credentials. Per the task spec ("If `uv` is not available, skip backend gates too - but document what was skipped"), backend gates are deferred to batch 9 (the final gate).
+- Backend gates (`uv run pytest`, `uv run ruff check src/ tests/`, `uv run mypy src/`) - **SKIPPED.** Backend gates (pytest/ruff/mypy) deferred to batch 9 - they don't require live model credentials but were skipped here to keep this docs-only batch focused.
 
 ### Plan spec deviations (batch 8)
 
-- The `dev-api` target uses `uv run --cache-dir .uv-cache advogado-api` (matches the existing `Inicio rapido` invocation in the previous README, and matches the `uv 0.8.11` setup used during the integration loop). The plan spec at `.opencode/plans/10-frontend-build-and-config.md` lists plain `uv run advogado-api`; the cache-dir form is what the project has been using throughout the gated batches and is documented in `.env.example` / `pyproject.toml` setup steps, so the cached form is kept for consistency.
-- `README.md` is 207 lines (vs ~161 in the pre-batch-8 state). The growth is driven by the larger endpoints table, the structured wire examples, the persistence section with deployment caveats, the Make targets table, and the dual-backend / dual-frontend quality-gates block. The plan did not pin a target line count.
+- The `dev-api` target uses `uv run --cache-dir .uv-cache advogado-api` (matches the existing `Inicio rapido` invocation in the previous README, and matches the `uv 0.8.11` setup used during the integration loop). The plan spec at `.opencode/plans/10-frontend-build-and-config.md` lists plain `uv run advogado-api`; the cache-dir form is what the project has been using throughout the gated batches and is documented in the README's `Inicio rapido` section and the committed `.gitignore`, so the cached form is kept for consistency.
+- `README.md` is 270 lines (vs ~161 in the pre-batch-8 state). The growth is driven by the larger endpoints table, the structured wire examples, the persistence section with deployment caveats, the Make targets table, and the dual-backend / dual-frontend quality-gates block. The plan did not pin a target line count.
 
 ### Known follow-ups (batch 8 -> batch 9)
 

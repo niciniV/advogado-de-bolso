@@ -29,7 +29,7 @@ Construa o frontend estatico (somente na primeira vez ou apos mudar a UI):
 make frontend
 ```
 
-Inicie a API + build do frontend em um unico processo:
+Inicie a API servindo o build estatico do frontend:
 
 ```powershell
 uv run --cache-dir .uv-cache advogado-api
@@ -143,9 +143,9 @@ Resposta bloqueada pelo revisor (HTTP 422, corpo completo do envelope):
 {
   "session_id": "9c1b8e74-1f0d-4a1b-9b9e-2c1f7a3e8a01",
   "updated_at": "2026-06-16T18:42:11.123Z",
-  "chat_history": [ /* inalterado */ ],
+  "chat_history": [],
   "blocked": true,
-  "blocked_message": "Nao consegui revisar a resposta com seguranca. Tente reformular a pergunta ou aguarde alguns instantes."
+  "blocked_message": "Nao foi possivel validar esta resposta com seguranca. Tente reformular a pergunta ou procure o PROCON, a Defensoria Publica ou um advogado de confianca."
 }
 ```
 
@@ -218,7 +218,7 @@ armazenamento compartilhado.
 | Alvo | O que faz |
 | --- | --- |
 | `make frontend` | Instala dependencias do frontend via `npm ci` e roda `npm run build` |
-| `make dev-api` | Sobe a API FastAPI com `uv run advogado-api` |
+| `make dev-api` | Sobe a API FastAPI com `uv run --cache-dir .uv-cache advogado-api` |
 | `make dev-frontend` | Sobe o Vite dev server em :5173 com proxy para :8000 |
 | `make dev` | Sobe API e frontend em paralelo (`make -j2 dev-api dev-frontend`) |
 
@@ -229,10 +229,13 @@ armazenamento compartilhado.
 | `GEMINI_API_KEY` | vazio | Chave preferida para o provedor Google |
 | `GOOGLE_API_KEY` | vazio | Chave alternativa |
 | `LLM_MODEL` | `gemma-4-31b-it` | Modelo enviado ao Pydantic AI |
+| `LLM_PROVIDER` | `google` | Provedor usado pelo Pydantic AI |
 | `THINKING_LEVEL` | `HIGH` | `HIGH`, `MEDIUM`, `LOW`, `MINIMAL` ou vazio |
 | `EMBEDDING_MODEL` | `BAAI/bge-m3` | Modelo local de embeddings |
+| `HF_HOME` | `./storage/hf_cache` | Diretorio de cache do HuggingFace |
 | `DATA_PATH` | `./data/raw` | Documentos de origem |
 | `CHROMA_PATH` | `./storage/chroma` | Banco vetorial persistido |
+| `COLLECTION_NAME` | `advogado_de_bolso` | Nome da colecao no Chroma |
 | `CASES_PATH` | `./storage/cases` | Diretorio de casos (um JSON por caso) |
 | `RETRIEVAL_TOP_K` | `5` | Trechos recuperados, entre 1 e 50 |
 | `API_HOST` | `127.0.0.1` | Interface de rede do servidor |
@@ -250,7 +253,7 @@ Backend (Python):
 
 ```powershell
 uv run --cache-dir .uv-cache pytest -q
-uv run --cache-dir .uv-cache ruff check src tests
+uv run --cache-dir .uv-cache ruff check src/ tests/
 uv run --cache-dir .uv-cache mypy src
 ```
 
