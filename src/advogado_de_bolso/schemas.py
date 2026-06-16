@@ -77,6 +77,7 @@ class StructuredChatResponse(BaseModel):
     questions: list[str] = Field(default_factory=list)
     suggestive_text: str | None = None
     template_letter: str | None = None
+    template_letter_assunto: str | None = None
     quick_replies: list[str] = Field(default_factory=list)
     blocked: bool = False
     blocked_message: str | None = None
@@ -138,6 +139,7 @@ class ChatMessage(BaseModel):
     relevant_content: str = ""
     suggestive_text: str | None = None
     template_letter: str | None = None
+    template_letter_assunto: str | None = None
     quick_replies: list[str] = Field(default_factory=list)
 
 

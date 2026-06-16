@@ -77,6 +77,50 @@ _DOC_QUICK_REPLIES: Final[list[str]] = [
 
 
 # ---------------------------------------------------------------------------
+# Title detection (long-form responses only)
+# ---------------------------------------------------------------------------
+
+_TITLE_MAX_CHARS: int = 200
+_RAG_SNIPPET_MAX_CHARS: int = 400
+
+
+def _is_title_line(line: str) -> bool:
+    """Heuristic: a first line is treated as a title iff it is short,
+    fully wrapped in `**...**` (a single bold span, no nested bold), and
+    the agent used bold deliberately to mark it as a title.
+
+    The LLM is instructed (see `agent.SYSTEM_PROMPT`) to begin long
+    formal responses (document drafts, multi-article analyses) with such
+    a line. Conversational responses do not use this pattern, so the
+    first line is treated as ordinary content — `step_title` stays empty
+    and the whole prose lands in `step_content`. This keeps normal chat
+    turns from being rendered as "posts with titles".
+    """
+    line = line.strip()
+    if not line or len(line) > _TITLE_MAX_CHARS:
+        return False
+    if not (line.startswith("**") and line.endswith("**")):
+        return False
+    # The interior must be a single bold span (no nested `**`).
+    return "**" not in line[2:-2]
+
+
+def _truncate_snippet(text: str, max_chars: int = _RAG_SNIPPET_MAX_CHARS) -> str:
+    """Truncate `text` at the previous word boundary within `max_chars`,
+    appending `...` if truncated. The full chunk text is preserved in
+    `case.model_history`; this helper only shapes the wire response so
+    the UI does not render a wall of legal prose under every reply.
+    """
+    if len(text) <= max_chars:
+        return text
+    truncated = text[:max_chars]
+    last_space = truncated.rfind(" ")
+    if last_space > max_chars // 2:
+        truncated = truncated[:last_space]
+    return truncated.rstrip() + "..."
+
+
+# ---------------------------------------------------------------------------
 # Main entrypoint
 # ---------------------------------------------------------------------------
 
@@ -107,6 +151,7 @@ def extract_structured_response(
     """
     deadline: DeadlineResult | None = None
     template_letter: str | None = None
+    template_letter_assunto: str | None = None
     relevant_chunks: list[KnowledgeChunk] = []
 
     for part in tool_returns:
@@ -117,6 +162,7 @@ def extract_structured_response(
             deadline = content
         elif name == "redigir_documento" and isinstance(content, DraftedDocument):
             template_letter = content.texto
+            template_letter_assunto = content.assunto or None
         elif name == "search_knowledge_base":
             # `content` is a `list[KnowledgeChunk]` (or empty list, or a
             # tuple — accept any Sequence). Already typed by the tool; no
@@ -129,21 +175,41 @@ def extract_structured_response(
             # (ISSUE-DS-006). Fail-soft: do not raise.
             logger.warning("adapter: unknown tool return tool_name=%s", name)
 
-    # Truncate relevant chunks to first 2 for relevant_title/relevant_content
+    # Truncate relevant chunks to first 2 for relevant_title/relevant_content.
+    # Each chunk's `texto` is capped at `_RAG_SNIPPET_MAX_CHARS` so the wire
+    # response carries a snippet, not a wall of legal prose.
     first_two = relevant_chunks[:2]
     relevant_title = first_two[0].fonte if first_two else ""
-    relevant_content = "\n\n".join(c.texto for c in first_two)
+    relevant_content = "\n\n".join(_truncate_snippet(c.texto) for c in first_two)
 
-    # step_title/step_content: first paragraph of prose, with fallback.
-    # Filter out empty / whitespace-only paragraphs so the fallback
-    # `"Análise inicial"` actually fires when prose is empty (ISSUE-004).
+    # step_title / step_content split. The agent's SYSTEM_PROMPT tells the
+    # LLM to begin long formal responses with a short bold title
+    # (`**...**`); conversational responses stay unformatted. The adapter
+    # detects the title via `_is_title_line` and only then splits it out.
+    # Conversational turns land entirely in `step_content` with
+    # `step_title == ""` so the UI renders a normal chat message.
     paragraphs = [p for p in prose.strip().split("\n\n", 1) if p.strip()]
-    if paragraphs:
-        step_title = paragraphs[0].split("\n", 1)[0][:120]
-        step_content = paragraphs[1] if len(paragraphs) > 1 else paragraphs[0]
-    else:
+    if not paragraphs:
         step_title = "Análise inicial"
         step_content = ""
+    else:
+        first_para = paragraphs[0]
+        first_line = first_para.split("\n", 1)[0]
+        if _is_title_line(first_line):
+            step_title = first_line.strip().strip("*").strip()
+            # Content = everything after the title line in the first
+            # paragraph, plus the second paragraph (if any).
+            tail = first_para[len(first_line):].lstrip("\n")
+            second = paragraphs[1] if len(paragraphs) > 1 else ""
+            step_content = (
+                tail + "\n\n" + second if tail and second else tail or second
+            )
+        else:
+            # No title — the whole prose is content. Leave `step_title`
+            # empty so the UI does not render a header on a normal
+            # conversational turn.
+            step_title = ""
+            step_content = prose
 
     # questions: numbered list or "Posso..." patterns in prose
     questions = _extract_questions(prose)
@@ -164,6 +230,7 @@ def extract_structured_response(
         questions=questions,
         suggestive_text=suggestive_text,
         template_letter=template_letter,
+        template_letter_assunto=template_letter_assunto,
         quick_replies=quick_replies,
         blocked=blocked,
         blocked_message=blocked_message,
@@ -240,6 +307,8 @@ __all__ = [
     "_extract_questions",
     "_extract_suggestive_text",
     "_derive_quick_replies",
+    "_is_title_line",
+    "_truncate_snippet",
     "_DEFAULT_QUICK_REPLIES",
     "_DEADLINE_QUICK_REPLIES",
     "_DOC_QUICK_REPLIES",

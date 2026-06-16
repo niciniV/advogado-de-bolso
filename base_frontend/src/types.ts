@@ -20,6 +20,7 @@ export interface ChatMessage {
   relevantContent?: string;
   suggestiveText?: string;
   templateLetter?: string;
+  templateLetterAssunto?: string;
   quickReplies?: string[];
 }
 

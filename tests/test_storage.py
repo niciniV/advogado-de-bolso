@@ -231,6 +231,7 @@ def _assistant_message(
     step_content: str | None = None,
     deadline: DeadlineResult | None = None,
     template_letter: str | None = None,
+    template_letter_assunto: str | None = None,
 ) -> ChatMessage:
     return ChatMessage(
         id=str(uuid4()),
@@ -240,6 +241,7 @@ def _assistant_message(
         step_content=step_content,
         deadline=deadline,
         template_letter=template_letter,
+        template_letter_assunto=template_letter_assunto,
     )
 
 

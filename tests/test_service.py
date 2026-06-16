@@ -33,6 +33,7 @@ from pydantic_ai.messages import (
 from advogado_de_bolso.contracts import DeadlineResult
 from advogado_de_bolso.schemas import CaseSummary
 from advogado_de_bolso.service import (
+    DISCLAIMER_FOOTER,
     REVIEW_BLOCKED_MESSAGE,
     AgentChatBackend,
     ChatBackend,
@@ -40,6 +41,7 @@ from advogado_de_bolso.service import (
     ChatService,
     ReviewerLike,
     _collect_tool_returns,
+    _ensure_legal_disclaimer,
     _truncate_history_to_turns,
     build_chat_service,
 )
@@ -817,6 +819,165 @@ class TestTruncateHistoryToTurns:
         # Truncate to 2 turns -> u2 turn (with tool call/return) + u3.
         out = _truncate_history_to_turns(msgs, 2)
         assert len(out) == 4
+
+
+# ---------------------------------------------------------------------------
+# _ensure_legal_disclaimer (deterministic footer injection before reviewer)
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureLegalDisclaimer:
+    def test_appends_footer_to_art_49_prose_without_disclaimer(self) -> None:
+        prose = (
+            "Voce tem 7 dias corridos para cancelar a compra online "
+            "(CDC art. 49)."
+        )
+        out = _ensure_legal_disclaimer(prose)
+        assert out.endswith(DISCLAIMER_FOOTER)
+        assert "CDC art. 49" in out
+        # Footer is appended exactly once.
+        assert out.count(DISCLAIMER_FOOTER) == 1
+
+    def test_appends_footer_for_prazo_marker(self) -> None:
+        out = _ensure_legal_disclaimer("O prazo para reclamar e de 30 dias.")
+        assert out.endswith(DISCLAIMER_FOOTER)
+
+    def test_appends_footer_for_lei_marker(self) -> None:
+        out = _ensure_legal_disclaimer("Conforme a Lei 8.078, art. 42, ...")
+        assert out.endswith(DISCLAIMER_FOOTER)
+
+    def test_appends_footer_for_direito_de_arrependimento(self) -> None:
+        out = _ensure_legal_disclaimer(
+            "Voce tem o direito de arrependimento na compra online."
+        )
+        assert out.endswith(DISCLAIMER_FOOTER)
+
+    def test_no_footer_for_non_legal_prose(self) -> None:
+        prose = "Ola, como posso ajudar voce hoje?"
+        assert _ensure_legal_disclaimer(prose) == prose
+
+    def test_no_footer_when_oab_mention_already_present(self) -> None:
+        prose = (
+            "Voce tem 7 dias corridos (CDC art. 49). "
+            "Consulte um advogado para casos complexos."
+        )
+        assert _ensure_legal_disclaimer(prose) == prose
+
+    def test_no_footer_when_advogado_mention_already_present(self) -> None:
+        prose = "O prazo e 30 dias (CDC art. 26). Procure um advogado."
+        assert _ensure_legal_disclaimer(prose) == prose
+
+    def test_no_double_footer_on_second_pass(self) -> None:
+        prose = "Voce tem 7 dias corridos (CDC art. 49)."
+        once = _ensure_legal_disclaimer(prose)
+        twice = _ensure_legal_disclaimer(once)
+        assert once == twice
+        assert twice.count(DISCLAIMER_FOOTER) == 1
+
+    def test_empty_prose_returns_empty(self) -> None:
+        assert _ensure_legal_disclaimer("") == ""
+
+    @pytest.mark.asyncio
+    async def test_chat_structured_appends_footer_to_persisted_prose(
+        self, cases_path: Path
+    ) -> None:
+        """Integration check: `chat_structured` runs the helper between
+        the backend and the reviewer. The persisted assistant message
+        must contain the footer when the agent's prose is legal content
+        without an OAB mention.
+        """
+
+        class LegalProseBackend:
+            async def run(
+                self, message: str, history: list[ModelMessage]
+            ) -> tuple[str, list[ModelMessage]]:
+                # The agent produced a clean Art. 49 response, NO OAB mention.
+                prose = (
+                    "Voce tem 7 dias corridos para cancelar a compra "
+                    "online (CDC art. 49). A loja e obrigada a aceitar."
+                )
+                new_msgs: list[ModelMessage] = [
+                    ModelRequest(parts=[UserPromptPart(content=message)]),
+                    ModelResponse(parts=[TextPart(content=prose)]),
+                ]
+                return prose, new_msgs
+
+        svc = ChatService(
+            backend=LegalProseBackend(),
+            reviewer=ApprovedReviewer(),
+            cases_path=cases_path,
+        )
+        result = await svc.chat_structured("Posso cancelar uma compra online?")
+        assert not result.response.blocked
+        # The wire response carries the footer (in step_content / chat_history).
+        assistant = next(
+            m for m in result.response.chat_history if m.sender == "assistant"
+        )
+        assert DISCLAIMER_FOOTER.strip() in assistant.text
+        assert "OAB" in assistant.text
+
+    @pytest.mark.asyncio
+    async def test_chat_structured_skips_footer_for_non_legal_prose(
+        self, cases_path: Path
+    ) -> None:
+        """Casual / non-legal messages are passed through unchanged."""
+
+        class CasualBackend:
+            async def run(
+                self, message: str, history: list[ModelMessage]
+            ) -> tuple[str, list[ModelMessage]]:
+                prose = "Ola! Como posso ajudar voce hoje?"
+                new_msgs: list[ModelMessage] = [
+                    ModelRequest(parts=[UserPromptPart(content=message)]),
+                    ModelResponse(parts=[TextPart(content=prose)]),
+                ]
+                return prose, new_msgs
+
+        svc = ChatService(
+            backend=CasualBackend(),
+            reviewer=ApprovedReviewer(),
+            cases_path=cases_path,
+        )
+        result = await svc.chat_structured("Oi")
+        assistant = next(
+            m for m in result.response.chat_history if m.sender == "assistant"
+        )
+        assert DISCLAIMER_FOOTER not in assistant.text
+
+    @pytest.mark.asyncio
+    async def test_chat_structured_does_not_double_append_footer(
+        self, cases_path: Path
+    ) -> None:
+        """If the agent's prose already includes the canonical OAB
+        sentence, the helper is a no-op and the footer is not double
+        appended by accident.
+        """
+
+        class LegalWithOabBackend:
+            async def run(
+                self, message: str, history: list[ModelMessage]
+            ) -> tuple[str, list[ModelMessage]]:
+                prose = (
+                    "Voce tem 7 dias corridos (CDC art. 49). "
+                    "Consulte um advogado para casos especificos."
+                )
+                new_msgs: list[ModelMessage] = [
+                    ModelRequest(parts=[UserPromptPart(content=message)]),
+                    ModelResponse(parts=[TextPart(content=prose)]),
+                ]
+                return prose, new_msgs
+
+        svc = ChatService(
+            backend=LegalWithOabBackend(),
+            reviewer=ApprovedReviewer(),
+            cases_path=cases_path,
+        )
+        result = await svc.chat_structured("Posso cancelar?")
+        assistant = next(
+            m for m in result.response.chat_history if m.sender == "assistant"
+        )
+        assert assistant.text.count(DISCLAIMER_FOOTER) == 0
+        assert "advogado" in assistant.text.lower()
 
 
 # ---------------------------------------------------------------------------

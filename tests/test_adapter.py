@@ -43,6 +43,8 @@ from advogado_de_bolso.adapter import (
     _derive_quick_replies,
     _extract_questions,
     _extract_suggestive_text,
+    _is_title_line,
+    _truncate_snippet,
     extract_structured_response,
 )
 from advogado_de_bolso.contracts import (
@@ -92,6 +94,7 @@ def _doc() -> DraftedDocument:
         tipo="reclamacao_procon",
         tom="formal",
         destinatario="PROCON",
+        assunto="Reclamacao contra a Loja X",
         texto="Senhor(a), venho por meio desta reclamar...",
     )
 
@@ -345,6 +348,21 @@ class TestExtractStructuredResponse:
             [_tool_return("redigir_documento", doc)],
         )
         assert result.template_letter == doc.texto
+        assert result.template_letter_assunto == "Reclamacao contra a Loja X"
+
+    def test_doc_turn_without_assunto_yields_none(self) -> None:
+        doc = DraftedDocument(
+            tipo="email_cobranca",
+            tom="formal",
+            destinatario="Loja",
+            texto="Cobranca sem assunto explicito.",
+        )
+        result = extract_structured_response(
+            "Documento pronto.",
+            [_tool_return("redigir_documento", doc)],
+        )
+        assert result.template_letter == "Cobranca sem assunto explicito."
+        assert result.template_letter_assunto is None
 
     def test_both_deadline_and_doc_populated(self) -> None:
         deadline = _deadline()
@@ -358,6 +376,7 @@ class TestExtractStructuredResponse:
         )
         assert result.deadline is deadline
         assert result.template_letter == doc.texto
+        assert result.template_letter_assunto == "Reclamacao contra a Loja X"
 
     def test_empty_rag_returns_no_relevant_content(self) -> None:
         result = extract_structured_response(
@@ -448,7 +467,7 @@ class TestExtractStructuredResponse:
                 [_tool_return("some_future_tool", {"future": "thing"})],
             )
         # response built without raising
-        assert result.step_title  # some non-empty title from the prose
+        assert result.step_content  # prose still flows into `step_content`
         # WARNING was emitted
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert any("some_future_tool" in r.getMessage() for r in warnings)
@@ -493,28 +512,95 @@ class TestExtractStructuredResponse:
 
 
 class TestProseToStep:
-    def test_step_title_is_first_line_of_prose(self) -> None:
-        result = extract_structured_response("Title line\nBody line", [])
-        assert result.step_title == "Title line"
+    """The adapter splits prose into `step_title` (only for long-form
+    responses) and `step_content` (the rest). The LLM is told to begin
+    long formal responses with a short bold title (`**...**`); the
+    adapter detects that pattern. Conversational responses do not use
+    it, so `step_title` stays empty and the whole prose lands in
+    `step_content` — the UI then renders a normal chat message."""
 
-    def test_step_content_is_rest_of_prose(self) -> None:
-        result = extract_structured_response("Title line\nBody line", [])
-        assert "Body line" in result.step_content
+    def test_no_title_for_conversational_response(self) -> None:
+        """A plain first line is NOT a title. The whole prose is content."""
+        result = extract_structured_response(
+            "Voce tem 7 dias para cancelar.\nA loja e obrigada a aceitar.",
+            [],
+        )
+        assert result.step_title == ""
+        assert "Voce tem 7 dias" in result.step_content
+        assert "A loja e obrigada" in result.step_content
 
-    def test_two_paragraph_split(self) -> None:
-        # `split("\n\n", 1)` yields 2 elements: paragraphs[0] (which seeds
-        # `step_title` from its first line) and paragraphs[1] (the rest).
-        # So `step_title == "Title"` (first line of paragraphs[0]) and
-        # `step_content == "Para 2"` (paragraphs[1] only). "Para 1" lives
-        # in paragraphs[0] and is consumed as part of the title source.
-        result = extract_structured_response("Title\nPara 1\n\nPara 2", [])
-        assert result.step_title == "Title"
-        assert result.step_content == "Para 2"
+    def test_title_for_bold_first_line(self) -> None:
+        """A bold first line is treated as a title; the `**` markers
+        are stripped."""
+        result = extract_structured_response(
+            "**Art. 49 do CDC: 7 dias para cancelar.**\n\nDetalhes aqui.",
+            [],
+        )
+        assert result.step_title == "Art. 49 do CDC: 7 dias para cancelar."
+        assert result.step_content == "Detalhes aqui."
 
-    def test_step_title_capped_at_120_chars(self) -> None:
-        long_title = "A" * 200
-        result = extract_structured_response(f"{long_title}\nBody", [])
-        assert len(result.step_title) == 120
+    def test_title_with_content_in_same_paragraph(self) -> None:
+        """Title + content can live in the same paragraph (separated by \\n)."""
+        result = extract_structured_response(
+            "**Titulo curto.**\nMais conteudo na mesma linha.",
+            [],
+        )
+        assert result.step_title == "Titulo curto."
+        assert result.step_content == "Mais conteudo na mesma linha."
+
+    def test_title_with_content_across_paragraphs(self) -> None:
+        """Title in one paragraph, body in the next (separated by \\n\\n)."""
+        result = extract_structured_response(
+            "**Titulo.**\n\nLinha 1 do corpo.\n\nLinha 2 do corpo.",
+            [],
+        )
+        assert result.step_title == "Titulo."
+        assert "Linha 1 do corpo." in result.step_content
+        assert "Linha 2 do corpo." in result.step_content
+
+    def test_no_title_for_partial_bold(self) -> None:
+        """Only the first word bolded is NOT a title — it is emphasis
+        within a sentence, not a header."""
+        result = extract_structured_response(
+            "**Importante:** Voce tem 7 dias.",
+            [],
+        )
+        assert result.step_title == ""
+        assert "Voce tem 7 dias" in result.step_content
+
+    def test_no_title_for_overlong_bold_line(self) -> None:
+        """A bold line over 200 chars is treated as content, not a title."""
+        long_bold = "**" + ("A" * 250) + "**"
+        result = extract_structured_response(f"{long_bold}\nBody", [])
+        assert result.step_title == ""
+        assert "Body" in result.step_content
+
+    def test_no_title_for_nested_bold(self) -> None:
+        """A line with nested `**` is not a clean title."""
+        result = extract_structured_response(
+            "**outer **inner** outer**\nBody",
+            [],
+        )
+        assert result.step_title == ""
+
+    def test_step_content_is_full_prose_when_no_title(self) -> None:
+        """When there is no title, `step_content` carries the whole prose
+        (no mid-sentence cuts) — fixes the previous 120-char cut issue."""
+        prose = (
+            "Sinto muito que voce esteja passando por isso, "
+            "mas a loja esta errada e voce tem todo o direito de cancelar."
+        )
+        result = extract_structured_response(prose, [])
+        assert result.step_title == ""
+        assert result.step_content == prose
+
+    def test_no_title_when_bold_line_has_no_close(self) -> None:
+        """Unbalanced bold is not a title (safety against malformed input)."""
+        result = extract_structured_response(
+            "**Titulo sem fechamento\nCorpo aqui.",
+            [],
+        )
+        assert result.step_title == ""
 
     def test_empty_prose_falls_back_to_initial_analysis(self) -> None:
         """ISSUE-004: empty prose must trigger the `Análise inicial`
@@ -527,6 +613,119 @@ class TestProseToStep:
         result = extract_structured_response("   \n\n  ", [])
         assert result.step_title == "Análise inicial"
         assert result.step_content == ""
+
+
+class TestIsTitleLine:
+    """Direct unit tests for the `_is_title_line` heuristic."""
+
+    def test_bold_short_line_is_title(self) -> None:
+        assert _is_title_line("**Art. 49 do CDC**") is True
+
+    def test_non_bold_line_is_not_title(self) -> None:
+        assert _is_title_line("Art. 49 do CDC") is False
+
+    def test_partial_bold_is_not_title(self) -> None:
+        assert _is_title_line("**bold** but more text") is False
+
+    def test_nested_bold_is_not_title(self) -> None:
+        assert _is_title_line("**a **b** c**") is False
+
+    def test_empty_line_is_not_title(self) -> None:
+        assert _is_title_line("") is False
+
+    def test_whitespace_only_is_not_title(self) -> None:
+        assert _is_title_line("   ") is False
+
+    def test_over_200_chars_is_not_title(self) -> None:
+        assert _is_title_line("**" + ("A" * 250) + "**") is False
+
+    def test_exactly_200_chars_is_title(self) -> None:
+        # 200 chars total, padding with "**" and "A"*196
+        line = "**" + "A" * 196 + "**"
+        assert len(line) == 200
+        assert _is_title_line(line) is True
+
+
+class TestTruncateSnippet:
+    """Direct unit tests for the `_truncate_snippet` helper used to
+    cap RAG chunks in the wire response."""
+
+    def test_short_text_unchanged(self) -> None:
+        assert _truncate_snippet("Art. 49 texto curto.") == "Art. 49 texto curto."
+
+    def test_text_exactly_at_limit_unchanged(self) -> None:
+        text = "A" * 400
+        assert _truncate_snippet(text) == text
+
+    def test_long_text_truncated_with_ellipsis(self) -> None:
+        text = "palavra " * 200  # ~1600 chars
+        out = _truncate_snippet(text)
+        assert out.endswith("...")
+        assert len(out) <= 410  # 400 + "..." + small slack
+
+    def test_truncation_breaks_at_word_boundary(self) -> None:
+        text = " ".join(["x"] * 100)  # 199 chars (99 spaces + 100 x's)
+        out = _truncate_snippet(text, max_chars=50)
+        # The cut should not end mid-word; it should end with "..."
+        assert out.endswith("...")
+        # No partial word at the end (before the ellipsis).
+        assert not out[:-3].endswith("x") or out[:-3].rstrip().endswith("x")
+
+
+# ===========================================================================
+# `adapter.py` — RAG snippet truncation
+# ===========================================================================
+
+
+class TestRagSnippetTruncation:
+    """The wire response caps each RAG chunk at ~400 chars so the UI
+    shows a snippet, not a wall of legal prose. The full chunk text
+    remains in `case.model_history` (not affected by this helper)."""
+
+    def test_short_chunk_passes_through_unchanged(self) -> None:
+        chunks = [
+            KnowledgeChunk(fonte="a.txt", texto="Art. 49 texto curto.")
+        ]
+        result = extract_structured_response(
+            "Prose.", [_tool_return("search_knowledge_base", chunks)]
+        )
+        assert "Art. 49 texto curto." in result.relevant_content
+        assert not result.relevant_content.endswith("...")
+
+    def test_long_chunk_truncated_with_ellipsis(self) -> None:
+        long_text = "palavra " * 200  # ~1600 chars
+        chunks = [KnowledgeChunk(fonte="a.txt", texto=long_text)]
+        result = extract_structured_response(
+            "Prose.", [_tool_return("search_knowledge_base", chunks)]
+        )
+        # The relevant_content for a single chunk is just that chunk
+        # (possibly with "..." appended).
+        assert result.relevant_content.endswith("...")
+        assert len(result.relevant_content) <= 410
+
+    def test_chunk_exactly_at_boundary_not_truncated(self) -> None:
+        text = "A" * 400
+        chunks = [KnowledgeChunk(fonte="a.txt", texto=text)]
+        result = extract_structured_response(
+            "Prose.", [_tool_return("search_knowledge_base", chunks)]
+        )
+        assert result.relevant_content == text
+        assert not result.relevant_content.endswith("...")
+
+    def test_multiple_chunks_each_truncated(self) -> None:
+        long_a = "palavra " * 200
+        long_b = "outra " * 200
+        chunks = [
+            KnowledgeChunk(fonte="a.txt", texto=long_a),
+            KnowledgeChunk(fonte="b.txt", texto=long_b),
+        ]
+        result = extract_structured_response(
+            "Prose.", [_tool_return("search_knowledge_base", chunks)]
+        )
+        # Two snippets joined by \n\n; both should end with "...".
+        parts = result.relevant_content.split("\n\n")
+        assert len(parts) == 2
+        assert all(p.endswith("...") for p in parts)
 
 
 # ===========================================================================

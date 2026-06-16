@@ -21,6 +21,7 @@ and reset in `finally`). See `agent.py` for the consumer.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 import uuid
 from collections.abc import Callable
@@ -55,6 +56,47 @@ REVIEW_BLOCKED_MESSAGE = (
     "Tente reformular a pergunta ou procure o PROCON, a Defensoria Publica "
     "ou um advogado de confianca."
 )
+
+
+# Deterministic OAB/PROCON footer injected before the reviewer runs. This
+# removes the LLM-vs-LLM disagreement about whether the disclaimer is
+# "present enough" to satisfy `REVISION_SYSTEM_PROMPT` criterion #5.
+# The footer is appended only when (a) the prose mentions a legal marker
+# (CDC article, law, prazo, right of repentance, etc.) AND (b) it does
+# not already mention OAB / advogado. Narrow on purpose: false negatives
+# (missing footer) fall back to the reviewer's decision; false positives
+# would clutter non-legal answers.
+DISCLAIMER_FOOTER: str = (
+    "\n\n---\n"
+    "Lembrete: nao substituo um advogado inscrito na OAB. Em caso de "
+    "duvida, procure o PROCON, a Defensoria Publica ou consumidor.gov.br."
+)
+
+_LEGAL_CONTENT_TRIGGERS: re.Pattern[str] = re.compile(
+    r"\bart\.\s*\d+|\blei\s+\d|\bcdc\b|\bprazo\b|\bdireito\s+de\s+arrepend",
+    re.IGNORECASE,
+)
+
+_OAB_MENTION: re.Pattern[str] = re.compile(r"\b(oab|advogado)\b", re.IGNORECASE)
+
+
+def _ensure_legal_disclaimer(prose: str) -> str:
+    """Append the standard OAB/PROCON footer iff `prose` is legal content
+    without an existing OAB/advogado mention.
+
+    This is a deterministic post-process; it removes the LLM-vs-LLM
+    disagreement about whether the disclaimer is "present enough" to
+    satisfy the reviewer. The LLM agent and the LLM reviewer can no
+    longer disagree on a fact (presence of a literal string) because
+    the string is now always present when its presence matters.
+    """
+    if not prose:
+        return prose
+    if not _LEGAL_CONTENT_TRIGGERS.search(prose):
+        return prose
+    if _OAB_MENTION.search(prose):
+        return prose
+    return prose.rstrip() + DISCLAIMER_FOOTER
 
 
 def _now() -> datetime:
@@ -255,6 +297,8 @@ class ChatService:
 
                 prose, new_messages = await self._backend.run(message, llm_history)
 
+                prose = _ensure_legal_disclaimer(prose)
+
                 revision = await self._reviewer(message, prose)
                 blocked = not revision.approved_as_is
                 blocked_message = REVIEW_BLOCKED_MESSAGE if blocked else None
@@ -418,7 +462,7 @@ def build_chat_service(
             question=question,
             response=response,
             model=settings.full_model_name,
-            model_settings=settings.build_model_settings(),
+            model_settings=settings.build_reviewer_model_settings(),
         )
 
     return ChatService(

@@ -66,6 +66,7 @@ describe('mapChatMessage', () => {
       relevant_content: 'Conteudo A',
       suggestive_text: 'Sugestao',
       template_letter: 'Carta',
+      template_letter_assunto: 'Notificacao de Desistencia',
       quick_replies: ['Sim', 'Nao'],
     };
     const out = mapChatMessage(wire);
@@ -84,7 +85,22 @@ describe('mapChatMessage', () => {
     expect(out.relevantContent).toBe('Conteudo A');
     expect(out.suggestiveText).toBe('Sugestao');
     expect(out.templateLetter).toBe('Carta');
+    expect(out.templateLetterAssunto).toBe('Notificacao de Desistencia');
     expect(out.quickReplies).toEqual(['Sim', 'Nao']);
+  });
+
+  it('omits templateLetterAssunto when the wire field is null', () => {
+    const wire: WireChatMessage = {
+      id: 'a-1',
+      sender: 'assistant',
+      text: 'Body',
+      timestamp: 1,
+      template_letter: 'Carta',
+      template_letter_assunto: null,
+    };
+    const out = mapChatMessage(wire);
+    expect(out.templateLetter).toBe('Carta');
+    expect(out.templateLetterAssunto).toBeUndefined();
   });
 
   it('keeps the user message shape minimal', () => {

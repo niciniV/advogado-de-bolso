@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
-from advogado_de_bolso.agent import _current_style, build_agent
+from advogado_de_bolso.agent import SYSTEM_PROMPT, _current_style, build_agent
 from advogado_de_bolso.config import Settings
 from advogado_de_bolso.service import ChatService
 from advogado_de_bolso.tools.revisor import RevisionResult
@@ -177,3 +177,82 @@ def test_blocked_response_does_not_create_case_file(tmp_path) -> None:
     assert not (cases_path / f"{case_id}.json").exists()
     # Cases list is empty
     assert asyncio.run(service.list_cases()) == []
+
+
+# ---------------------------------------------------------------------------
+# SYSTEM_PROMPT style contract (UX post-fix)
+# ---------------------------------------------------------------------------
+
+
+class TestSystemPromptStyleContract:
+    """Pin the SYSTEM_PROMPT so the conversational / full-draft split
+    and the closing-draft-offer rule cannot regress. The LLM is told:
+
+    - Conversational responses: no title; can end with a draft offer
+      (or a question about the case) as a follow-up.
+    - Full-draft responses (long formal): begin with a short bold
+      title (`**...**`); do NOT end with another draft offer because
+      the user is already looking at a draft.
+
+    The adapter (`adapter.py`) detects the bold first line and lifts it
+    into `step_title`. Without the bold, the whole prose is content and
+    the UI renders a normal chat message.
+    """
+
+    def test_distinguishes_conversational_from_full_draft(self) -> None:
+        """The prompt must mention both response formats explicitly."""
+        assert "conversacionais" in SYSTEM_PROMPT
+        assert "longas ou formais" in SYSTEM_PROMPT or "formais" in SYSTEM_PROMPT
+
+    def test_conversational_rule_says_no_title(self) -> None:
+        """Conversational responses must NOT use a title."""
+        # Find the conversational block and assert "NAO use titulo".
+        assert "NAO use titulo" in SYSTEM_PROMPT
+
+    def test_full_draft_rule_says_bold_title(self) -> None:
+        """Full-draft responses must begin with a short bold title."""
+        # Bold marker (rendered as **negrito**) appears in the style block.
+        assert "**negrito**" in SYSTEM_PROMPT
+
+    def test_conversational_close_may_offer_draft(self) -> None:
+        """Conversational responses MAY end with a draft offer as a
+        follow-up — the user explicitly asked for this."""
+        assert "PODE oferecer um aprofundamento" in SYSTEM_PROMPT
+        assert "redigir um documento" in SYSTEM_PROMPT
+
+    def test_conversational_close_may_ask_questions(self) -> None:
+        """Conversational responses MAY end with questions about the case
+        to clarify the situation."""
+        assert "fazer perguntas" in SYSTEM_PROMPT or "perguntas" in SYSTEM_PROMPT
+
+    def test_full_draft_close_must_not_offer_draft(self) -> None:
+        """Full-draft responses must NOT end with another draft offer."""
+        # The prompt wraps the line across "outro / documento"; use a
+        # whitespace-tolerant check rather than pinning a hard substring.
+        import re
+
+        assert re.search(
+            r"NAO termine oferecendo redigir outro\s+documento",
+            SYSTEM_PROMPT,
+        ), "SYSTEM_PROMPT must forbid closing-draft offers in full-draft responses"
+
+    def test_no_decorative_lists(self) -> None:
+        """The prompt forbids decorative list use."""
+        assert "Sem listas decorativas" in SYSTEM_PROMPT
+
+    def test_format_split_is_in_estilo_block(self) -> None:
+        """The format split lives in the ## Estilo section."""
+        estilo_idx = SYSTEM_PROMPT.index("## Estilo")
+        assert "conversacionais" in SYSTEM_PROMPT[estilo_idx:]
+
+    def test_bold_marker_uses_double_asterisk(self) -> None:
+        """The prompt uses the canonical `**` Markdown bold marker, which
+        is what `_is_title_line` in the adapter looks for."""
+        # The style block must use the same `**` marker the adapter
+        # detects, not `<b>` or `__` or any other variant.
+        assert "**" in SYSTEM_PROMPT
+        # And it must not be confused with the existing bold-emphasis
+        # guidance for prazos / valores / artigos (which also uses **).
+        # The title block uses `**negrito**` (the literal word "negrito"
+        # wrapped in `**`).
+        assert "**negrito**" in SYSTEM_PROMPT

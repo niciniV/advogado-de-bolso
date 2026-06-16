@@ -32,6 +32,7 @@ class DraftedDocument(BaseModel):
     tipo: str
     tom: Tom
     destinatario: str
+    assunto: str = ""
     texto: str
 
 

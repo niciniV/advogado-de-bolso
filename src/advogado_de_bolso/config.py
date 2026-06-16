@@ -79,6 +79,24 @@ class Settings(BaseSettings):
 
         return GoogleModelSettings(google_thinking_config=thinking)  # type: ignore[typeddict-item]
 
+    def build_reviewer_model_settings(self) -> Any:
+        """Configuracoes de modelo usadas SOMENTE pelo revisor.
+
+        Force `thinking_level=MINIMAL` regardless of `self.thinking_level`.
+        Higher thinking levels expand the reviewer's surface area for
+        "found a reason to block", which produced intermittent false
+        positives on otherwise acceptable Art. 49 / Art. 26 responses.
+        The reviewer is a yes/no gate; minimal thinking is the correct
+        knob for that role.
+        """
+        if self.llm_provider != "google":
+            return None
+        from pydantic_ai.models.google import GoogleModelSettings
+
+        return GoogleModelSettings(
+            google_thinking_config={"thinking_level": "MINIMAL"}  # type: ignore[typeddict-item]
+        )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

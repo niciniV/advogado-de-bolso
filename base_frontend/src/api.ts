@@ -28,6 +28,7 @@ export interface WireChatMessage {
   relevant_content?: string | null;
   suggestive_text?: string | null;
   template_letter?: string | null;
+  template_letter_assunto?: string | null;
   quick_replies?: string[] | null;
 }
 
@@ -43,6 +44,7 @@ export interface WireStructuredChatResponse {
   questions?: string[] | null;
   suggestive_text?: string | null;
   template_letter?: string | null;
+  template_letter_assunto?: string | null;
   quick_replies?: string[] | null;
   blocked?: boolean;
   blocked_message?: string | null;
@@ -150,6 +152,9 @@ export function mapChatMessage(payload: WireChatMessage): ChatMessage {
   if (payload.relevant_content != null) msg.relevantContent = payload.relevant_content;
   if (payload.suggestive_text != null) msg.suggestiveText = payload.suggestive_text;
   if (payload.template_letter != null) msg.templateLetter = payload.template_letter;
+  if (payload.template_letter_assunto != null) {
+    msg.templateLetterAssunto = payload.template_letter_assunto;
+  }
   if (payload.quick_replies) msg.quickReplies = payload.quick_replies;
   return msg;
 }

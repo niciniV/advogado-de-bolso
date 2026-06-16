@@ -39,6 +39,8 @@ This file is a child DOX that documents the contents of the `.opencode/` directo
 | `loop/open-issues.md` | Source of truth for all issues found during the implementation-review-fix loop. |
 | `loop/orchestration-state.md` | Compact orchestration state for the implementation-review-fix loop. |
 | `loop/fix-log.md` | Compact chronological log of fixer subagent activities. |
+| `agents/plan-reviewer-nex.md` | Nex N2 Pro subagent for reviewing plans, designs, and code. |
+| `agents/code-writer-nex.md` | Nex N2 Pro subagent for implementing focused code changes. |
 
 ## Plan
 

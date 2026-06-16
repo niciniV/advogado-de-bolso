@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Send, Paperclip, ChevronRight, CheckCircle, HelpCircle, Calendar, MessageSquare, Clipboard, Check, RefreshCw } from "lucide-react";
+import { Send, Paperclip, ChevronRight, CheckCircle, HelpCircle, Calendar, MessageSquare, RefreshCw } from "lucide-react";
 import { ChatMessage, Deadline, Case } from "../types";
+import { parseInlineMarkdown } from "../markdown";
+import CollapsibleSources from "./CollapsibleSources";
+import TemplateLetterCard from "./TemplateLetterCard";
 
 interface ChatInterfaceProps {
   chatHistory: ChatMessage[];
@@ -16,8 +19,7 @@ export default function ChatInterface({
   onSaveCase,
 }: ChatInterfaceProps) {
   const [inputText, setInputText] = useState("");
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-  
+
   // Recalculating state simulation
   const [recalculatingIdx, setRecalculatingIdx] = useState<number | null>(null);
   const [customDate, setCustomDate] = useState("");
@@ -37,12 +39,6 @@ export default function ChatInterface({
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") handleSend();
-  };
-
-  const copyToClipboard = (text: string, idx: number) => {
-    navigator.clipboard.writeText(text);
-    setCopiedIndex(idx);
-    setTimeout(() => setCopiedIndex(null), 2000);
   };
 
   const handleRecalculate = (idx: number, originalDeadline: Deadline) => {
@@ -90,7 +86,7 @@ export default function ChatInterface({
   return (
     <div className="flex flex-col flex-grow h-full" id="chat-interface">
       {/* Scrollable Chat Canvas */}
-      <div className="flex-1 overflow-y-auto space-y-6 pb-28 pt-2" id="chat-messages-scroll">
+      <div className="flex-1 overflow-y-auto space-y-6 pb-48 pt-2" id="chat-messages-scroll">
         {chatHistory.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center" id="empty-state">
             <div className="w-14 h-14 bg-slate-50 border border-slate-100 rounded-full flex items-center justify-center mb-4 shadow-[0px_2px_4px_rgba(0,33,71,0.02)]">
@@ -131,23 +127,18 @@ export default function ChatInterface({
                           <h4 className="font-bold text-[#002147] text-sm flex items-center gap-1.5 mb-1">
                             <CheckCircle className="w-4 h-4 text-emerald-600" /> {msg.stepTitle}
                           </h4>
-                          <p className="text-xs text-slate-600 leading-relaxed">{msg.stepContent || msg.text}</p>
+                          <p className="text-xs text-slate-600 leading-relaxed">{parseInlineMarkdown(msg.stepContent || msg.text)}</p>
                         </div>
                       )}
 
                       {/* Main Message Content */}
                       {(isUser || (!msg.stepTitle && msg.text)) && (
-                        <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                        <p className="text-sm leading-relaxed whitespace-pre-wrap">{parseInlineMarkdown(msg.text)}</p>
                       )}
 
-                      {/* Relevant legal context box */}
-                      {!isUser && msg.relevantTitle && (
-                        <div className="border-t border-slate-100 pt-3">
-                          <h4 className="font-bold text-[#002147] text-sm flex items-center gap-1.5 mb-1">
-                            <HelpCircle className="w-4 h-4 text-[#002147]" /> {msg.relevantTitle}
-                          </h4>
-                          <p className="text-xs text-slate-600 leading-relaxed">{msg.relevantContent}</p>
-                        </div>
+                      {/* Relevant legal context box (collapsible, hides raw source filenames) */}
+                      {!isUser && (msg.relevantTitle || msg.relevantContent) && (
+                        <CollapsibleSources content={msg.relevantContent || ""} />
                       )}
 
                       {/* PRAZO CALCULADO IMMERSIVE CARD */}
@@ -181,9 +172,9 @@ export default function ChatInterface({
                           </ul>
 
                           {msg.deadline.note && (
-                            <p className="text-[10px] text-slate-400 italic border-t border-slate-100 pt-2 font-medium">
-                              Nota: {msg.deadline.note}
-                            </p>
+                              <p className="text-[10px] text-slate-400 italic border-t border-slate-100 pt-2 font-medium">
+                                Nota: {parseInlineMarkdown(msg.deadline.note)}
+                              </p>
                           )}
 
                           {/* Recalculate Date selector inline */}
@@ -235,7 +226,7 @@ export default function ChatInterface({
                           <h4 className="font-bold text-[#002147] text-xs mb-2">Preciso confirmar algumas informações para continuarmos:</h4>
                           <ul className="list-disc pl-4 space-y-1 text-[#002147] text-xs font-semibold">
                             {msg.questions.map((quest, qidx) => (
-                              <li key={qidx}>{quest}</li>
+                              <li key={qidx}>{parseInlineMarkdown(quest)}</li>
                             ))}
                           </ul>
                         </div>
@@ -243,29 +234,15 @@ export default function ChatInterface({
 
                       {/* Concluding suggestion text */}
                       {!isUser && msg.stepTitle && (
-                        <p className="text-xs text-slate-500 italic mt-2">{msg.suggestiveText}</p>
+                        <p className="text-xs text-slate-500 italic mt-2">{parseInlineMarkdown(msg.suggestiveText)}</p>
                       )}
 
-                      {/* TEMPLATE NOTIFICATION CONTEST LETTER CARD */}
+                      {/* TEMPLATE NOTIFICATION CONTEST LETTER CARD (subject box + body, both copyable) */}
                       {!isUser && msg.templateLetter && (
-                        <div className="bg-[#f0f4f8] rounded-xl border border-slate-200 p-4 mt-2">
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-[#002147]">Mensagem Formal Pronta</span>
-                            <button
-                              onClick={() => copyToClipboard(msg.templateLetter || "", idx)}
-                              className="text-xs font-semibold text-[#002147] hover:text-slate-600 inline-flex items-center gap-1 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm"
-                            >
-                              {copiedIndex === idx ? (
-                                <><Check className="w-3 h-3 text-emerald-600" /> Copiado</>
-                              ) : (
-                                <><Clipboard className="w-3 h-3" /> Copiar Texto</>
-                              )}
-                            </button>
-                          </div>
-                          <pre className="text-slate-700 text-xs leading-relaxed whitespace-pre-wrap font-sans bg-white border border-slate-100 p-3 rounded-lg max-h-60 overflow-y-auto">
-                            {msg.templateLetter}
-                          </pre>
-                        </div>
+                        <TemplateLetterCard
+                          letter={msg.templateLetter}
+                          assunto={msg.templateLetterAssunto}
+                        />
                       )}
                     </div>
                   </div>
@@ -300,7 +277,7 @@ export default function ChatInterface({
 
       {/* Suggested Quick Reply Action Chips (Bottom) */}
       {chatHistory.length > 0 && !isSendingMessage && (
-        <div className="fixed bottom-20 left-0 w-full px-4 z-30" id="chat-quick-replies">
+        <div className="fixed bottom-32 left-0 w-full px-4 z-30" id="chat-quick-replies">
           <div className="max-w-[1100px] mx-auto flex flex-wrap justify-end gap-2 pr-2" id="chips-row">
             {/* Contextual replies matching the last assistant message */}
             {(() => {

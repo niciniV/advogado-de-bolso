@@ -87,25 +87,37 @@ async def redigir_documento(
 
     Args:
         tipo: Tipo do documento a redigir.
-        contexto: Resumo do caso e fatos relevantes.
+        contexto: Resumo do caso e fatos relevantes, incluindo dados do
+            remetente (nome, CPF, telefone), dados do caso (numero do
+            pedido, modelo do produto, data de recebimento) e nome da
+            empresa / destinatario. O agente principal deve ter colhido
+            essas informacoes com o usuario antes de chamar esta tool.
         objetivo: O que o usuario quer alcancar com o documento.
         destinatario: Para quem o documento sera enviado (empresa, PROCON, etc.).
         tom: Tom desejado - 'formal', 'cordial' ou 'firme'.
 
     Returns:
-        Um envelope `DraftedDocument` (tipo, tom, destinatario, texto) onde
-        `texto` e o texto final do documento gerado pelo sub-agente, pronto
-        para uso.
+        Um envelope `DraftedDocument` (tipo, tom, destinatario, assunto, texto)
+        onde `assunto` e o titulo curto do documento (a linha `Assunto: ...`
+        que o sub-agente emite na primeira linha) e `texto` e o corpo do
+        documento sem a linha de assunto. Se o sub-agente nao emitir uma
+        linha `Assunto:`, `assunto` vem vazio e `texto` contem o documento
+        inteiro.
     """
     user_prompt = (
         f"Destinatario: {destinatario}\n"
         f"Tom: {tom}\n"
         f"Objetivo: {objetivo}\n"
-        f"Contexto / Resumo do caso:\n{contexto}\n\n"
-        "Redija o documento. Responda APENAS com o texto final, sem comentarios, "
-        "sem marcacoes tipo 'Aqui esta o documento:', sem aspas em volta. "
-        "Voce pode incluir placeholders como [NOME COMPLETO] ou [ENDERECO] "
-        "apenas para dados que o usuario tera que preencher."
+        f"Contexto / Resumo do caso (com dados do remetente, do caso, etc.):\n{contexto}\n\n"
+        "Redija o documento final. Responda APENAS com o texto do documento, "
+        "sem comentarios, sem marcacoes tipo 'Aqui esta o documento:', sem "
+        "aspas em volta.\n\n"
+        "Formato obrigatorio: a PRIMEIRA linha do documento deve ser "
+        "'Assunto: <assunto>' (sem quebra de linha no meio do assunto). "
+        "Em seguida, uma linha em branco, e depois o corpo do documento. "
+        "Use os dados fornecidos no contexto para preencher o documento - "
+        "minimize placeholders como [NOME COMPLETO] ou [CPF]; use-os apenas "
+        "para dados que nao foram fornecidos pelo usuario."
     )
 
     drafting_agent = _get_drafting_agent(tipo)
@@ -118,5 +130,32 @@ async def redigir_documento(
         tipo=tipo,
         tom=tom,
         destinatario=destinatario,
-        texto=result.output,
+        **_split_assunto(result.output),
     )
+
+
+def _split_assunto(text: str) -> dict[str, str]:
+    """Split a drafted letter into ``assunto`` and ``texto`` based on the
+    leading ``Assunto: ...`` line.
+
+    The sub-agent is instructed to start the letter with a single-line
+    ``Assunto: <subject>`` header. This helper lifts that line out as
+    ``assunto`` and returns the rest as ``texto``. If the first non-empty
+    line does not match that pattern, ``assunto`` comes back empty and
+    ``texto`` holds the full original text.
+    """
+    if not text:
+        return {"assunto": "", "texto": ""}
+    stripped = text.lstrip()
+    if not stripped:
+        return {"assunto": "", "texto": ""}
+    first_line, sep, rest = stripped.partition("\n")
+    first_line = first_line.rstrip()
+    lowered = first_line.lower()
+    for prefix in ("assunto:", "assunto :"):
+        if lowered.startswith(prefix):
+            return {
+                "assunto": first_line[len(prefix):].strip(),
+                "texto": rest.lstrip("\n").rstrip(),
+            }
+    return {"assunto": "", "texto": text.strip()}

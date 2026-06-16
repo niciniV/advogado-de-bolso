@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from advogado_de_bolso.contracts import DraftedDocument, Tom
-from advogado_de_bolso.tools.redigir import TipoDocumento, redigir_documento
+from advogado_de_bolso.tools.redigir import TipoDocumento, _split_assunto, redigir_documento
 from advogado_de_bolso.tools.redigir import Tom as RedigirTom
 
 
@@ -24,6 +24,49 @@ def mock_agent():
         _get_drafting_agent.cache_clear()
 
 
+class TestSplitAssunto:
+    """`_split_assunto` lifts a leading 'Assunto: ...' line out of a drafted
+    letter and returns the rest as the body. The sub-agent is instructed to
+    start the letter with that header line; this helper is what enforces
+    the contract on the way out of the tool."""
+
+    def test_lifts_assunto_line(self):
+        out = _split_assunto(
+            "Assunto: Notificacao de Desistencia\n\nPrezados,\n\nCorpo."
+        )
+        assert out == {
+            "assunto": "Notificacao de Desistencia",
+            "texto": "Prezados,\n\nCorpo.",
+        }
+
+    def test_lifts_assunto_with_lowercase_prefix(self):
+        out = _split_assunto("assunto: foo\n\nCorpo")
+        assert out["assunto"] == "foo"
+        assert out["texto"] == "Corpo"
+
+    def test_lifts_assunto_with_space_before_colon(self):
+        out = _split_assunto("Assunto : foo\n\nCorpo")
+        assert out["assunto"] == "foo"
+        assert out["texto"] == "Corpo"
+
+    def test_strips_leading_whitespace_before_assunto(self):
+        out = _split_assunto("\n\n  Assunto: foo\n\nCorpo")
+        assert out["assunto"] == "foo"
+        assert out["texto"] == "Corpo"
+
+    def test_empty_string_returns_empty(self):
+        assert _split_assunto("") == {"assunto": "", "texto": ""}
+
+    def test_no_assunto_line_returns_full_text_as_body(self):
+        out = _split_assunto("Prezados,\n\nCorpo do documento.")
+        assert out == {"assunto": "", "texto": "Prezados,\n\nCorpo do documento."}
+
+    def test_assunto_only_no_body(self):
+        out = _split_assunto("Assunto: Apenas o assunto")
+        assert out["assunto"] == "Apenas o assunto"
+        assert out["texto"] == ""
+
+
 class TestRedigirDocumento:
     @pytest.mark.asyncio
     async def test_returns_drafted_document(self, ctx, mock_agent):
@@ -39,7 +82,27 @@ class TestRedigirDocumento:
         assert result.tipo == "email_cobranca"
         assert result.tom == "formal"
         assert result.destinatario == "Cliente"
+        # No 'Assunto:' in the mocked output -> empty subject, full text in body
+        assert result.assunto == ""
         assert result.texto == "texto gerado pelo agente mockado"
+
+    @pytest.mark.asyncio
+    async def test_extracts_assunto_from_sub_agent_output(self, ctx, mock_agent):
+        mock_agent.return_value.run.return_value.output = (
+            "Assunto: Notificacao de Desistencia\n\n"
+            "Prezados,\n\nSolicito a devolucao..."
+        )
+        result = await redigir_documento(
+            ctx=ctx,
+            tipo="notificacao_extrajudicial",
+            contexto="Compra de celular realizada online.",
+            objetivo="Solicitar a devolucao.",
+            destinatario="Loja X",
+            tom="formal",
+        )
+        assert result.assunto == "Notificacao de Desistencia"
+        assert result.texto == "Prezados,\n\nSolicito a devolucao..."
+        assert "Assunto" not in result.texto
 
     @pytest.mark.asyncio
     async def test_agent_created_with_correct_system_prompt(self, ctx, mock_agent):
@@ -53,6 +116,22 @@ class TestRedigirDocumento:
         )
         call_kwargs = mock_agent.call_args[1]
         assert "PROCON" in call_kwargs["system_prompt"]
+
+    @pytest.mark.asyncio
+    async def test_user_prompt_requires_assunto_header(self, ctx, mock_agent):
+        """The sub-agent's user prompt must tell it to start the document
+        with an 'Assunto: <subject>' line so the parser can split the
+        subject out into a separate wire field."""
+        await redigir_documento(
+            ctx=ctx,
+            tipo="email_cobranca",
+            contexto="Teste",
+            objetivo="Teste",
+            destinatario="Teste",
+        )
+        user_prompt = mock_agent.return_value.run.call_args[0][0]
+        assert "Assunto:" in user_prompt
+        assert "Formato obrigatorio" in user_prompt
 
     @pytest.mark.asyncio
     async def test_all_document_types(self, ctx, mock_agent):
