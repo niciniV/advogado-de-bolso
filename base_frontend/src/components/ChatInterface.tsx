@@ -4,16 +4,16 @@ import { ChatMessage, Deadline, Case } from "../types";
 
 interface ChatInterfaceProps {
   chatHistory: ChatMessage[];
-  isLoading: boolean;
+  isSendingMessage: boolean;
   onSendMessage: (text: string) => void;
   onSaveCase: (deadline?: Deadline) => void;
 }
 
 export default function ChatInterface({
   chatHistory,
-  isLoading,
+  isSendingMessage,
   onSendMessage,
-  onSaveCase
+  onSaveCase,
 }: ChatInterfaceProps) {
   const [inputText, setInputText] = useState("");
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
@@ -27,10 +27,10 @@ export default function ChatInterface({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatHistory, isLoading]);
+  }, [chatHistory, isSendingMessage]);
 
   const handleSend = () => {
-    if (!inputText.trim() || isLoading) return;
+    if (!inputText.trim() || isSendingMessage) return;
     onSendMessage(inputText);
     setInputText("");
   };
@@ -276,7 +276,7 @@ export default function ChatInterface({
         )}
 
         {/* Loading Spinner bubble */}
-        {isLoading && (
+        {isSendingMessage && (
           <div className="flex w-full justify-start pr-12">
             <div className="bg-[#ffffff] border border-slate-200 text-slate-800 rounded-2xl rounded-tl-[4px] p-4 shadow-[0px_2px_4px_rgba(0,33,71,0.02)]">
               <div className="flex items-center gap-3">
@@ -299,7 +299,7 @@ export default function ChatInterface({
       </div>
 
       {/* Suggested Quick Reply Action Chips (Bottom) */}
-      {chatHistory.length > 0 && !isLoading && (
+      {chatHistory.length > 0 && !isSendingMessage && (
         <div className="fixed bottom-20 left-0 w-full px-4 z-30" id="chat-quick-replies">
           <div className="max-w-[1100px] mx-auto flex flex-wrap justify-end gap-2 pr-2" id="chips-row">
             {/* Contextual replies matching the last assistant message */}
@@ -339,17 +339,17 @@ export default function ChatInterface({
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={handleKeyPress}
-              placeholder="Digite sua dúvida ou responda ao advogado..."
+              placeholder="Digite sua duvida ou responda ao advogado..."
               className="w-full bg-transparent border-none py-3 px-1 text-sm text-slate-800 placeholder-slate-400 focus:outline-none outline-none focus:ring-0"
-              disabled={isLoading}
+              disabled={isSendingMessage}
               id="chat-text-input-box"
             />
             <button
               onClick={handleSend}
-              disabled={isLoading || !inputText.trim()}
+              disabled={isSendingMessage || !inputText.trim()}
               className={`p-2.5 rounded-full mr-1.5 focus:outline-none transition-all flex items-center justify-center ${
-                inputText.trim() && !isLoading 
-                  ? "bg-[#002147] text-[#aec7f6] hover:scale-105" 
+                inputText.trim() && !isSendingMessage
+                  ? "bg-[#002147] text-[#aec7f6] hover:scale-105"
                   : "bg-slate-50 text-slate-300"
               }`}
               id="send-button-click"

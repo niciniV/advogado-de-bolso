@@ -1,161 +1,76 @@
-import React, { useState, useEffect } from "react";
-import { 
-  Gavel, 
-  Bell, 
-  Home as HomeIcon, 
-  MessageSquare, 
-  FolderLock, 
-  Settings as SettingsIcon, 
-  Plus, 
+import React, { useState, useEffect, useRef } from "react";
+import {
+  Gavel,
+  Bell,
+  Home as HomeIcon,
+  MessageSquare,
+  FolderLock,
+  Settings as SettingsIcon,
   CheckCircle,
-  X 
+  X,
 } from "lucide-react";
 import { Case, ChatMessage, Deadline, AppPreferences } from "./types";
 import HomeDashboard from "./components/HomeDashboard";
 import ChatInterface from "./components/ChatInterface";
 import CasesList from "./components/CasesList";
 import ProfilePreferences from "./components/ProfilePreferences";
+import { seedCases, initialPreferences } from "./defaults";
+import {
+  apiClient,
+  deriveLastMessage,
+  deriveTagText,
+  formatCaseDate,
+  mapStructuredResponse,
+  type WireStructuredChatRequest,
+} from "./api";
 
-// Realistic Seed Cases with pre-loaded Portuguese chat histories matching CDC scenarios
-const seedCases: Case[] = [
-  {
-    id: "case-1",
-    title: "Celular comprado online",
-    date: "Hoje",
-    lastMessage: "Prazo de arrependimento calculado...",
-    tagText: "Prazo calculado",
-    iconName: "shopping_bag",
-    timestamp: Date.now(),
-    responseStyle: "detalhado",
-    chatHistory: [
-      {
-        id: "msg-1a",
-        sender: "user",
-        text: "Comprei um celular online e me arrependi. Recebi ontem, mas a loja disse que não aceita devolução.",
-        timestamp: Date.now() - 3600000 * 2
-      },
-      {
-        id: "msg-1b",
-        sender: "assistant",
-        text: "O Artigo 49 do CDC resguarda compras fora de estabelecimento físico.",
-        timestamp: Date.now() - 3600000 * 1.9,
-        stepTitle: "Entendi o caso",
-        stepContent: "Você realizou uma compra de um produto (celular) fora do estabelecimento comercial (online) e deseja exercer o direito de arrependimento logo após o recebimento, mas enfrentou recusa da loja.",
-        relevantTitle: "O que pode ser relevante",
-        relevantContent: "O Código de Defesa do Consumidor (CDC), em seu artigo 49, garante o direito de arrependimento em até 7 dias para compras feitas fora do estabelecimento comercial, independentemente do motivo.",
-        deadline: {
-          title: "Prazo calculado",
-          type: "Direito de arrependimento",
-          startDate: "10/06/2026",
-          endDate: "17/06/2026",
-          base: "CDC art. 49",
-          note: "Estimativa baseada nas informações fornecidas. A data correta pode depender dos detalhes do caso."
-        },
-        questions: [
-          "A compra foi feita pela internet, telefone ou aplicativo?",
-          "Você recebeu o produto em que data exata?",
-          "O produto está completo, com embalagem e acessórios originais?"
-        ],
-        suggestiveText: "Com base nisso, posso preparar uma mensagem para a loja pedindo o cancelamento e reembolso.",
-        quickReplies: ["Preparar mensagem", "Continuar orientação", "Fazer outra pergunta"]
-      }
-    ]
-  },
-  {
-    id: "case-2",
-    title: "Cobrança duplicada",
-    date: "Ontem",
-    lastMessage: "Você pode reunir comprovantes...",
-    tagText: undefined,
-    iconName: "receipt_long",
-    timestamp: Date.now() - 3600000 * 24,
-    responseStyle: "simples",
-    chatHistory: [
-      {
-        id: "msg-2a",
-        sender: "user",
-        text: "Me cobraram duas vezes a assinatura no cartão de crédito.",
-        timestamp: Date.now() - 3600000 * 25
-      },
-      {
-        id: "msg-2b",
-        sender: "assistant",
-        text: "Você pode contestar a cobrança e solicitar a devolução de forma dobrada.",
-        timestamp: Date.now() - 3600000 * 24.8,
-        stepTitle: "Cobrança Duplicada Identificada",
-        stepContent: "Foi cobrado duas vezes pelo mesmo serviço no seu cartão e precisa reaver os valores.",
-        relevantTitle: "Indébito em Dobro (CDC Artigo 42)",
-        relevantContent: "O artigo 42, parágrafo único, do CDC, preceitua que o consumidor cobrado indevidamente faz jus à restituição em dobro do excesso pago, salvo hipóteses de engano justificável por parte do credor.",
-        questions: [
-          "Já entrou em contato com o suporte ou banco?",
-          "As duas cobranças aparecem faturadas ou apenas pendentes?"
-        ],
-        suggestiveText: "Com esses comprovantes em mãos, podemos preparar sua contestação legal."
-      }
-    ]
-  },
-  {
-    id: "case-3",
-    title: "Atraso na entrega",
-    date: "12 jun",
-    lastMessage: "Mensagem para a empresa preparada...",
-    tagText: "Mensagem pronta",
-    iconName: "local_shipping",
-    timestamp: Date.now() - 3600000 * 48,
-    responseStyle: "firme",
-    chatHistory: [
-      {
-        id: "msg-3a",
-        sender: "user",
-        text: "Meu guarda-roupa devia ter chegado dia 5 e até agora nada. Quero meu dinheiro de volta ou entrega expressa.",
-        timestamp: Date.now() - 3600000 * 49
-      },
-      {
-        id: "msg-3b",
-        sender: "assistant",
-        text: "O atraso injustificado dá direito ao cumprimento forçado ou cancelamento.",
-        timestamp: Date.now() - 3600000 * 48.5,
-        stepTitle: "Atraso Grave na Entrega",
-        stepContent: "O prazo estipulado contratualmente expirou sem que a mercadoria fosse entregue ao consumidor final.",
-        relevantTitle: "Descumprimento de Oferta (CDC Artigo 35)",
-        relevantContent: "O Código faculta ao consumidor rescindir o pacto com estorno corrigido frente à recusa do fornecedor em suprir as datas aventadas.",
-        templateLetter: `À [Nome do Estabelecimento]
-Notificação formal por atraso na entrega (Art. 35 do CDC)
+type IconName = Case["iconName"];
+type ResponseStyle = Case["responseStyle"];
 
-Solicito a imediata devolução dos valores pagos frente à quebra de oferta do guarda-roupa com entrega em atraso desde o dia 5.`,
-        suggestiveText: "Notificação extrajudicial gerada com sucesso. Copie o texto para contatar o suporte."
-      }
-    ]
+interface PendingBlockedCase {
+  sessionId: string;
+  title: string;
+  iconName: IconName;
+  responseStyle: ResponseStyle;
+}
+
+interface SendOptions {
+  forceNewCase?: boolean;
+}
+
+function deriveCaseMeta(text: string): { title: string; icon_name: IconName } {
+  const lower = text.toLowerCase();
+  if (lower.includes("celular")) {
+    return { title: "Celular comprado online", icon_name: "shopping_bag" };
   }
-];
-
-const initialPreferences: AppPreferences = {
-  responseStyle: "detalhado",
-  userProfile: {
-    name: "Dr. Ricardo Silva",
-    email: "ricardo.silva@exemplo.com",
-    avatarUrl: "https://lh3.googleusercontent.com/aida-public/AB6AXuD4QKwTDtz0Z5Bt6pBtWBGZN1P1m5rOqAlJZi6W8pIx0lH_cjLoHztEcbu92KAl8S3HfuQ091CC06vJ5wbGPEtRKU8gJqXmJCqbyhC97pciDQytYPmDDB38XuhhbuyVOkzlLhUfpI5e0MTHmgcuUv26XweVQ4dzn136wjcw1dk_o6bIBs7ohPn3i2eVnDSojNgp7ieT9-be-IBidM0uV6IQIUyU6uEA_zHKumGxrVKc37zODHnnMudrwGS79Nv2NWTNgn0o4-GdSeNv"
-  },
-  systemStatus: {
-    knowledgeBase: true,
-    citations: true,
-    securityCheck: true
+  if (lower.includes("cobr") || lower.includes("cobran")) {
+    return { title: "Cobranca indevida", icon_name: "receipt_long" };
   }
-};
+  if (lower.includes("atraso") || lower.includes("entrega")) {
+    return { title: "Atraso na entrega", icon_name: "local_shipping" };
+  }
+  if (lower.includes("notif") || lower.includes("extrajudicial")) {
+    return { title: "Notificacao extrajudicial", icon_name: "gavel" };
+  }
+  return { title: "Nova consulta", icon_name: "gavel" };
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<"inicio" | "conversar" | "casos" | "perfil">("inicio");
-  const [cases, setCases] = useState<Case[]>(seedCases);
+  const [cases, setCases] = useState<Case[]>([]);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const [currentChatHistory, setCurrentChatHistory] = useState<ChatMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [isLoadingCases, setIsLoadingCases] = useState<boolean>(true);
   const [preferences, setPreferences] = useState<AppPreferences>(initialPreferences);
 
-  // In-app visual notifications toast (preserves iframe sandbox rules)
+  const pendingBlockedCaseRef = useRef<PendingBlockedCase | null>(null);
+
+  // In-app visual notifications toast
   const [toast, setToast] = useState<{ show: boolean; msg: string; type: "success" | "info" }>({
     show: false,
     msg: "",
-    type: "success"
+    type: "success",
   });
 
   const triggerToast = (msg: string, type: "success" | "info" = "success") => {
@@ -164,190 +79,313 @@ export default function App() {
 
   useEffect(() => {
     if (toast.show) {
-      const timer = setTimeout(() => setToast(t => ({ ...t, show: false })), 4000);
+      const timer = setTimeout(() => setToast((t) => ({ ...t, show: false })), 4000);
       return () => clearTimeout(timer);
     }
   }, [toast.show]);
 
-  // Loading case on selection
-  const handleSelectCase = (caseId: string) => {
-    const selected = cases.find(c => c.id === caseId);
-    if (selected) {
+  // ISSUE-M3-017: load real cases on mount. Show seedCases only if no real cases are returned.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const real = await apiClient.listCases();
+        if (cancelled) return;
+        setCases(real.length > 0 ? real : seedCases);
+      } catch {
+        if (!cancelled) setCases(seedCases);
+      } finally {
+        if (!cancelled) setIsLoadingCases(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const isDemoCase = (c: Case | undefined | null): boolean => Boolean(c?.is_demo);
+
+  const activeCase = cases.find((c) => c.id === activeCaseId);
+
+  // Selecting a case: demo stays local; real case fetches via API.
+  const handleSelectCase = async (caseId: string) => {
+    pendingBlockedCaseRef.current = null;
+    const selected = cases.find((c) => c.id === caseId);
+    if (!selected) return;
+    if (isDemoCase(selected)) {
       setActiveCaseId(caseId);
       setCurrentChatHistory(selected.chatHistory);
       setActiveTab("conversar");
       triggerToast(`Carregado: ${selected.title}`, "info");
+      return;
+    }
+    try {
+      const full = await apiClient.getCase(caseId);
+      setCases((prev) => prev.map((c) => (c.id === caseId ? full : c)));
+      setActiveCaseId(caseId);
+      setCurrentChatHistory(full.chatHistory);
+      setActiveTab("conversar");
+      triggerToast(`Carregado: ${full.title}`, "info");
+    } catch (err) {
+      console.error("Failed to load case", err);
+      triggerToast("Falha ao carregar o caso.", "info");
     }
   };
 
-  // Safe Case Deletion
-  const handleDeleteCase = (caseId: string) => {
-    setCases(prev => prev.filter(c => c.id !== caseId));
-    if (activeCaseId === caseId) {
-      setActiveCaseId(null);
-      setCurrentChatHistory([]);
-    }
-    triggerToast("Consulta excluída com sucesso.");
-  };
-
-  const handleRenameCase = (caseId: string, newTitle: string) => {
-    setCases(prev => prev.map(c => {
-      if (c.id === caseId) {
-        return { ...c, title: newTitle };
+  // Deleting a case: demo stays local; real case calls API.
+  const handleDeleteCase = async (caseId: string) => {
+    const target = cases.find((c) => c.id === caseId);
+    if (isDemoCase(target)) {
+      setCases((prev) => prev.filter((c) => c.id !== caseId));
+      if (activeCaseId === caseId) {
+        setActiveCaseId(null);
+        setCurrentChatHistory([]);
       }
-      return c;
-    }));
-    triggerToast("Consulta renomeada com sucesso!");
+      triggerToast("Consulta excluida com sucesso.");
+      return;
+    }
+    try {
+      await apiClient.deleteCase(caseId);
+      setCases((prev) => prev.filter((c) => c.id !== caseId));
+      if (activeCaseId === caseId) {
+        setActiveCaseId(null);
+        setCurrentChatHistory([]);
+      }
+      triggerToast("Consulta excluida com sucesso.");
+    } catch (err) {
+      console.error("Failed to delete case", err);
+      triggerToast("Falha ao excluir o caso.", "info");
+    }
   };
 
-  // Create empty new consultation
+  const handleRenameCase = async (caseId: string, newTitle: string) => {
+    const target = cases.find((c) => c.id === caseId);
+    if (isDemoCase(target)) {
+      setCases((prev) => prev.map((c) => (c.id === caseId ? { ...c, title: newTitle } : c)));
+      triggerToast("Consulta renomeada com sucesso!");
+      return;
+    }
+    try {
+      const updated = await apiClient.renameCase(caseId, newTitle);
+      setCases((prev) => prev.map((c) => (c.id === caseId ? updated : c)));
+      triggerToast("Consulta renomeada com sucesso!");
+    } catch (err) {
+      console.error("Failed to rename case", err);
+      triggerToast("Falha ao renomear o caso.", "info");
+    }
+  };
+
+  // Create empty new consultation; if initialPrompt provided, force a new case.
   const handleStartConsultation = (initialPrompt?: string) => {
+    pendingBlockedCaseRef.current = null;
     setActiveCaseId(null);
     setCurrentChatHistory([]);
     setActiveTab("conversar");
     if (initialPrompt) {
-      // Simulate typing prompt right in
-      triggerToast("Análise de caso iniciada...");
-      handleSendMessage(initialPrompt);
+      triggerToast("Analise de caso iniciada...");
+      handleSendMessage(initialPrompt, { forceNewCase: true });
     }
   };
 
-  // Message dispatcher
-  const handleSendMessage = async (text: string) => {
-    const userMsgId = `user-msg-${Date.now()}`;
-    const newUserMsg: ChatMessage = {
-      id: userMsgId,
+  // Update preferences; if responseStyle changes and a real case is active, PATCH it.
+  const handleUpdatePreferences = async (updated: Partial<AppPreferences>) => {
+    setPreferences((prev) => ({ ...prev, ...updated }));
+    if (updated.responseStyle && activeCase && !isDemoCase(activeCase)) {
+      try {
+        const synced = await apiClient.updateCaseMeta(activeCase.id, {
+          response_style: updated.responseStyle,
+        });
+        setCases((prev) => prev.map((c) => (c.id === synced.id ? synced : c)));
+      } catch (err) {
+        console.error("Failed to sync response style to case", err);
+      }
+    }
+    triggerToast("Configuracoes atualizadas!");
+  };
+
+  // Explicit user-triggered "save this generated result" from the tool card.
+  // Does NOT create cases (the first successful message already auto-created one).
+  const handleSaveCaseFromChat = async (deadline?: Deadline) => {
+    if (!activeCase || isDemoCase(activeCase)) return;
+    const firstUserMsg = currentChatHistory.find((m) => m.sender === "user")?.text || "";
+    const meta = deriveCaseMeta(firstUserMsg);
+    try {
+      const updated = await apiClient.updateCaseMeta(activeCase.id, {
+        title: deadline ? meta.title : meta.title,
+        icon_name: meta.icon_name,
+      });
+      setCases((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      triggerToast("Caso e calculo persistidos com sucesso!");
+    } catch (err) {
+      console.error("Failed to save case from chat", err);
+      triggerToast("Falha ao persistir o caso.", "info");
+    }
+  };
+
+  // Message dispatcher with blocked-retry ref + auto-create metadata.
+  const handleSendMessage = async (text: string, options?: SendOptions) => {
+    const forceNewCase = options?.forceNewCase === true;
+    const demoActive = isDemoCase(activeCase);
+
+    let sessionId: string | null;
+    let firstCreateMeta: { title: string; iconName: IconName; responseStyle: ResponseStyle } | null = null;
+
+    if (forceNewCase || demoActive) {
+      pendingBlockedCaseRef.current = null;
+      sessionId = null;
+    } else if (pendingBlockedCaseRef.current) {
+      const p = pendingBlockedCaseRef.current;
+      sessionId = p.sessionId;
+      firstCreateMeta = { title: p.title, iconName: p.iconName, responseStyle: p.responseStyle };
+    } else if (activeCaseId && !demoActive) {
+      sessionId = activeCaseId;
+    } else {
+      sessionId = null;
+    }
+
+    if (sessionId === null && !firstCreateMeta) {
+      const meta = deriveCaseMeta(text);
+      firstCreateMeta = {
+        title: meta.title,
+        iconName: meta.icon_name,
+        responseStyle: preferences.responseStyle,
+      };
+    }
+
+    const userMsg: ChatMessage = {
+      id: `user-${Date.now()}`,
       sender: "user",
       text,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
-
-    // Update active screen state
-    const updatedHistory = [...currentChatHistory, newUserMsg];
+    const updatedHistory = [...currentChatHistory, userMsg];
     setCurrentChatHistory(updatedHistory);
-    setIsLoading(true);
+    setIsSendingMessage(true);
 
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          history: updatedHistory,
-          responseStyle: preferences.responseStyle
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error("API return status not ok");
-      }
-
-      const resData = await response.json();
-
-      const botMsg: ChatMessage = {
-        id: `bot-msg-${Date.now()}`,
-        sender: "assistant",
-        text: resData.stepContent || "Consulta processada.",
-        timestamp: Date.now(),
-        stepTitle: resData.stepTitle,
-        stepContent: resData.stepContent,
-        relevantTitle: resData.relevantTitle,
-        relevantContent: resData.relevantContent,
-        deadline: resData.deadline,
-        questions: resData.questions,
-        suggestiveText: resData.suggestiveText,
-        templateLetter: resData.templateLetter,
-        quickReplies: resData.quickReplies
-      };
-
-      const finalHistory = [...updatedHistory, botMsg];
-      setCurrentChatHistory(finalHistory);
-
-      // Save log dynamically under the loaded case, if any is active
-      if (activeCaseId) {
-        setCases(prev => prev.map(c => {
-          if (c.id === activeCaseId) {
-            return {
-              ...c,
-              lastMessage: botMsg.stepContent || botMsg.text,
-              chatHistory: finalHistory,
-              tagText: botMsg.deadline ? "Prazo calculado" : botMsg.templateLetter ? "Mensagem pronta" : undefined
-            };
-          }
-          return c;
-        }));
-      }
-    } catch (err) {
-      console.error("Consultation sending error:", err);
-      // Failover message block
-      const botMsg: ChatMessage = {
-        id: `bot-msg-err-${Date.now()}`,
-        sender: "assistant",
-        text: "Desculpe pelo contratempo. Ocorreu um problema no gateway de IA, mas você ainda conta com a proteção do Código de Defesa do Consumidor brasileiro. Refaça a dúvida curta para outra resolução.",
-        timestamp: Date.now()
-      };
-      setCurrentChatHistory([...updatedHistory, botMsg]);
-    } finally {
-      setIsLoading(false);
+    const wirePayload: WireStructuredChatRequest = {
+      message: text,
+      session_id: sessionId,
+      response_style: firstCreateMeta?.responseStyle ?? preferences.responseStyle,
+    };
+    if (firstCreateMeta) {
+      wirePayload.title = firstCreateMeta.title;
+      wirePayload.icon_name = firstCreateMeta.iconName;
     }
-  };
 
-  // Interactive Save action inside tool cards
-  const handleSaveCaseFromChat = (deadline?: Deadline) => {
-    // Generate a title based on the first user message or calculation
-    const firstUserMsg = currentChatHistory.find(m => m.sender === "user")?.text || "Nova Consulta";
-    const titleText = deadline ? `${deadline.title.replace("calculado de ", "")}` : `Consulta do Consumidor`;
-    const customizedTitle = firstUserMsg.toLowerCase().includes("celular") 
-      ? "Celular comprado online" 
-      : firstUserMsg.toLowerCase().includes("cobrança") 
-      ? "Cobrança indevida" 
-      : firstUserMsg.toLowerCase().includes("atraso") 
-      ? "Atraso na entrega" 
-      : titleText;
+    let response: Response;
+    try {
+      response = await apiClient.chatStructured(wirePayload);
+    } catch (err) {
+      console.error("Network error", err);
+      setCurrentChatHistory((prev) => [
+        ...prev,
+        {
+          id: `bot-err-${Date.now()}`,
+          sender: "assistant",
+          text: "Desculpe pelo contratempo. Ocorreu um problema no gateway de IA. Tente novamente em instantes.",
+          timestamp: Date.now(),
+        },
+      ]);
+      setIsSendingMessage(false);
+      return;
+    }
 
-    // Check if we are modifying/saving an existing case or creating a brand new one
-    if (activeCaseId) {
-      setCases(prev => prev.map(c => {
-        if (c.id === activeCaseId) {
-          return {
-            ...c,
-            title: customizedTitle,
-            chatHistory: currentChatHistory,
-            tagText: deadline ? "Prazo calculado" : "Mensagem pronta"
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+
+    if (!response.ok) {
+      const obj = (body || {}) as {
+        blocked?: boolean;
+        blocked_message?: string;
+        session_id?: string;
+        chat_history?: WireStructuredChatRequest extends never ? never : unknown[];
+      };
+      if (obj.blocked) {
+        const blockedMessage = obj.blocked_message || "Resposta bloqueada pelo revisor.";
+        if (sessionId === null && firstCreateMeta && obj.session_id) {
+          pendingBlockedCaseRef.current = {
+            sessionId: obj.session_id,
+            title: firstCreateMeta.title,
+            iconName: firstCreateMeta.iconName,
+            responseStyle: firstCreateMeta.responseStyle,
           };
         }
-        return c;
-      }));
-      triggerToast("Caso e cálculo persistidos com sucesso!");
-    } else {
-      const newId = `case-new-${Date.now()}`;
-      const newC: Case = {
-        id: newId,
-        title: customizedTitle,
-        date: "Hoje",
-        lastMessage: currentChatHistory[currentChatHistory.length - 1]?.text || "Histórico guardado.",
-        tagText: deadline ? "Prazo calculado" : "Mensagem pronta",
-        iconName: firstUserMsg.toLowerCase().includes("celular") ? "shopping_bag" : "gavel",
-        timestamp: Date.now(),
-        responseStyle: preferences.responseStyle,
-        chatHistory: currentChatHistory
-      };
-      
-      setCases(prev => [newC, ...prev]);
-      setActiveCaseId(newId);
-      triggerToast("Consulta adicionada à aba Meus Casos!");
+        setCurrentChatHistory((prev) => [
+          ...prev,
+          {
+            id: `bot-blocked-${Date.now()}`,
+            sender: "assistant",
+            text: blockedMessage,
+            timestamp: Date.now(),
+          },
+        ]);
+        setIsSendingMessage(false);
+        return;
+      }
+      setCurrentChatHistory((prev) => [
+        ...prev,
+        {
+          id: `bot-err-${Date.now()}`,
+          sender: "assistant",
+          text: "Nao foi possivel processar a mensagem agora. Tente novamente.",
+          timestamp: Date.now(),
+        },
+      ]);
+      setIsSendingMessage(false);
+      return;
     }
-  };
 
-  const handleUpdatePreferences = (updated: Partial<AppPreferences>) => {
-    setPreferences(prev => ({ ...prev, ...updated }));
-    triggerToast("Configurações atualizadas!");
+    const mapped = mapStructuredResponse(body as Parameters<typeof mapStructuredResponse>[0]);
+    setCurrentChatHistory(mapped.chatHistory);
+    setActiveCaseId(mapped.sessionId);
+
+    const assistantMsg =
+      [...mapped.chatHistory].reverse().find((m) => m.sender === "assistant") || null;
+
+    if (firstCreateMeta) {
+      const isFirstReal = cases.filter((c) => !c.is_demo).length === 0;
+      const newCase: Case = {
+        id: mapped.sessionId,
+        title: firstCreateMeta.title,
+        date: formatCaseDate(mapped.updatedAt),
+        lastMessage: deriveLastMessage(mapped.chatHistory),
+        tagText: deriveTagText(mapped.chatHistory) || (assistantMsg?.deadline ? "Prazo calculado" : assistantMsg?.templateLetter ? "Mensagem pronta" : undefined),
+        iconName: firstCreateMeta.iconName,
+        timestamp: Date.parse(mapped.updatedAt) || Date.now(),
+        responseStyle: firstCreateMeta.responseStyle,
+        is_demo: false,
+        chatHistory: mapped.chatHistory,
+      };
+      setCases((prev) => {
+        const withoutDemos = isFirstReal ? prev.filter((c) => !c.is_demo) : prev;
+        return [newCase, ...withoutDemos.filter((c) => c.id !== newCase.id)];
+      });
+      pendingBlockedCaseRef.current = null;
+    } else if (activeCaseId) {
+      setCases((prev) =>
+        prev.map((c) => {
+          if (c.id !== activeCaseId) return c;
+          return {
+            ...c,
+            date: formatCaseDate(mapped.updatedAt),
+            lastMessage: deriveLastMessage(mapped.chatHistory),
+            tagText: deriveTagText(mapped.chatHistory) || c.tagText,
+            timestamp: Date.parse(mapped.updatedAt) || c.timestamp,
+            chatHistory: mapped.chatHistory,
+          };
+        }),
+      );
+    }
+
+    setIsSendingMessage(false);
   };
 
   return (
     <div className="bg-[#fbf9f8] min-h-screen text-slate-900 font-sans flex flex-col antialiased">
-      
-      {/* Dynamic Header top navigation (Web view & iPad) */}
       <header className="fixed top-0 left-0 w-full bg-white border-b border-slate-200 z-50 h-16 shadow-[0px_2px_4px_rgba(0,33,71,0.01)] px-5 flex items-center justify-between" id="app-header-nav">
         <div className="flex items-center gap-2.5">
           <div className="bg-[#002147] p-2 rounded-xl text-white">
@@ -359,29 +397,22 @@ export default function App() {
           </div>
         </div>
 
-        {/* Desktop Navbar Tabs layout */}
         <nav className="hidden md:flex items-center gap-2">
           {[
-            { id: "inicio", label: "Início", icon: HomeIcon },
+            { id: "inicio", label: "Inicio", icon: HomeIcon },
             { id: "conversar", label: "Conversar", icon: MessageSquare },
             { id: "casos", label: "Meus Casos", icon: FolderLock },
-            { id: "perfil", label: "Preferências", icon: SettingsIcon }
-          ].map(tab => {
+            { id: "perfil", label: "Preferencias", icon: SettingsIcon },
+          ].map((tab) => {
             const Icon = tab.icon;
             const isSel = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
-                onClick={() => {
-                  setActiveTab(tab.id as any);
-                  if (tab.id === "conversar" && currentChatHistory.length === 0) {
-                    // Seed if empty on quick tab
-                    setCurrentChatHistory([]);
-                  }
-                }}
+                onClick={() => setActiveTab(tab.id as typeof activeTab)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                  isSel 
-                    ? "bg-[#002147] text-[#aec7f6] shadow-sm scale-102" 
+                  isSel
+                    ? "bg-[#002147] text-[#aec7f6] shadow-sm scale-102"
                     : "text-slate-500 hover:bg-slate-50 hover:text-[#002147]"
                 }`}
               >
@@ -392,13 +423,12 @@ export default function App() {
           })}
         </nav>
 
-        {/* Notifications and status area */}
         <div className="flex items-center gap-2">
-          <button 
+          <button
             type="button"
-            onClick={() => triggerToast("Sem notificações no momento.", "info")}
+            onClick={() => triggerToast("Sem notificacoes no momento.", "info")}
             className="text-slate-400 hover:text-[#002147] bg-slate-50 hover:bg-slate-100 p-2 rounded-xl transition-all relative"
-            title="Notificações"
+            title="Notificacoes"
           >
             <Bell className="w-4.5 h-4.5" />
             <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#aec7f6] rounded-full"></span>
@@ -406,11 +436,10 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main viewport canvas */}
       <main className="flex-grow pt-20 pb-20 md:pb-6 px-4 max-w-[1100px] w-full mx-auto" id="app-main-canvas">
         <div className="h-full flex flex-col" id="app-tab-switcher">
           {activeTab === "inicio" && (
-            <HomeDashboard 
+            <HomeDashboard
               cases={cases}
               onStartConsultation={handleStartConsultation}
               onSelectCase={handleSelectCase}
@@ -418,47 +447,52 @@ export default function App() {
           )}
 
           {activeTab === "conversar" && (
-            <ChatInterface 
+            <ChatInterface
               chatHistory={currentChatHistory}
-              isLoading={isLoading}
+              isSendingMessage={isSendingMessage}
               onSendMessage={handleSendMessage}
               onSaveCase={handleSaveCaseFromChat}
             />
           )}
 
           {activeTab === "casos" && (
-            <CasesList 
+            <CasesList
               cases={cases}
               onSelectCase={handleSelectCase}
-               onNewConsultation={() => handleStartConsultation()}
+              onNewConsultation={() => handleStartConsultation()}
               onDeleteCase={handleDeleteCase}
               onRenameCase={handleRenameCase}
             />
           )}
 
           {activeTab === "perfil" && (
-            <ProfilePreferences 
+            <ProfilePreferences
               preferences={preferences}
-              onUpdatePreferences={handleUpdatePreferences}
+              onUpdatePreferences={(p) => {
+                void handleUpdatePreferences(p);
+              }}
             />
+          )}
+
+          {isLoadingCases && activeTab === "casos" && (
+            <div className="p-6 text-center text-xs text-slate-500">Carregando casos...</div>
           )}
         </div>
       </main>
 
-      {/* Mobile responsive Fixed Bottom tab bar navigation */}
       <nav className="md:hidden fixed bottom-0 left-0 w-full h-14 bg-white border-t border-slate-200 z-50 flex justify-around items-center px-4 shadow-[0px_-2px_12px_rgba(0,33,71,0.03)]" id="mobile-nav-bar">
         {[
-          { id: "inicio", label: "Início", icon: HomeIcon },
+          { id: "inicio", label: "Inicio", icon: HomeIcon },
           { id: "conversar", label: "Conversar", icon: MessageSquare },
           { id: "casos", label: "Casos", icon: FolderLock },
-          { id: "perfil", label: "Preferências", icon: SettingsIcon }
-        ].map(tab => {
+          { id: "perfil", label: "Preferencias", icon: SettingsIcon },
+        ].map((tab) => {
           const Icon = tab.icon;
           const isSel = activeTab === tab.id;
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => setActiveTab(tab.id as typeof activeTab)}
               className={`flex flex-col items-center justify-center flex-1 h-full py-1.5 cursor-pointer relative transition-all ${
                 isSel ? "text-[#002147] font-bold scale-102" : "text-slate-400 font-medium"
               }`}
@@ -473,20 +507,18 @@ export default function App() {
         })}
       </nav>
 
-      {/* Persistent Inline Safe Toast Alerts (circumvents Sandbox restriction) */}
       {toast.show && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-[#002147]/95 backdrop-blur-xs text-white text-xs font-bold py-2 px-4 rounded-xl flex items-center gap-2 shadow-lg border border-slate-800 animate-in fade-in slide-in-from-bottom duration-200" id="in-app-safe-toast">
           <CheckCircle className="w-4 h-4 text-[#aec7f6]" />
           <span>{toast.msg}</span>
-          <button 
-            onClick={() => setToast(t => ({ ...t, show: false }))}
+          <button
+            onClick={() => setToast((t) => ({ ...t, show: false }))}
             className="p-1 hover:text-[#aec7f6] transition-colors ml-2"
           >
             <X className="w-3 h-3" />
           </button>
         </div>
       )}
-
     </div>
   );
 }

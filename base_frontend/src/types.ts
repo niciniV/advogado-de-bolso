@@ -28,11 +28,12 @@ export interface Case {
   title: string;
   date: string; // e.g. "Hoje", "Ontem"
   lastMessage: string;
-  tagText?: string; // "Prazo calculado" or "Mensagem pronta" or null
+  tagText?: string; // "Prazo calculado" or "Mensagem pronta" or "DEMO" or null
   iconName: 'shopping_bag' | 'receipt_long' | 'local_shipping' | 'gavel';
   timestamp: number;
   chatHistory: ChatMessage[];
   responseStyle: 'simples' | 'detalhado' | 'firme';
+  is_demo?: boolean; // ISSUE-M3-005: frontend-only marker for the three seed demos
 }
 
 export interface UserProfile {

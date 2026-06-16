@@ -3011,3 +3011,61 @@ Batch 6 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.
 - The `Makefile` (plan 10's spec, plan 20's batch 8) is NOT created in this batch. The lockfile is ready for it.
 - `base_frontend/dist/` is now produced by `npm run build`; the FastAPI server's `REACT_DIST` static mount (see `src/advogado_de_bolso/api.py`) will pick it up on the next server restart. The Vite dev-server proxy means the API can be developed against the real FastAPI server during dev iteration.
 
+## Implementation Notes → Batch 7 (Frontend integration)
+
+Batch 7 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.md`) is now complete. The React frontend is rewired to consume the FastAPI backend directly: a typed `apiClient` covers every endpoint the UI needs, the top-level `App` component dispatches per-case CRUD (local for demos, HTTP for real cases), the `ChatInterface` adopts the renamed `isSendingMessage` prop, and the new `App.test.tsx` (8 integration tests) plus `api.test.ts` (15 client tests) close the loop on the vite build config landed in batch 6. `base_frontend/server.ts` is deleted; the FastAPI server now serves the production build.
+
+- **Implementation date:** 2026-06-16
+- **Subagent:** implementation (round 29)
+
+### Gate verification (batch 7)
+
+- `cd base_frontend && npm run test` - **23/23 pass** (`src/api.test.ts` 15 + `src/App.test.tsx` 8). 0 skipped, 0 failed. Coverage spans URL building, request body shape, non-2xx error handling, the demo→real handoff on `listCases` response, pending-blocked-retry ref management, demo CRUD staying local, real case CRUD dispatching to `/api/cases/{id}`, auto-create metadata on the first chat, the `Nova Consulta Inteligente` and quick-guide flows not mutating the active case, and rename/delete round-trips for real cases.
+- `cd base_frontend && npm run lint` (`tsc --noEmit`) - **passes** (no output = success). The only `tsc` adjustment was tightening `FetchCall.body` from `unknown` to `Record<string, unknown>` in the test helper so `call.body?.message` / `.session_id` accesses are typed (10 inferred `unknown`-property errors in the pre-existing test handler were caught and fixed).
+- `cd base_frontend && npm run build` (`vite build`) - **passes.** 1679 modules transformed; `dist/index.html` (0.41 kB), `dist/assets/index-CHZYQSCy.css` (31.44 kB), `dist/assets/index-np8Mnw6N.js` (253.76 kB); built in 2.35s. The FastAPI server's `REACT_DIST` static mount picks up the new bundle.
+
+### Test fixes applied during this round
+
+Three failures on initial entry to the batch were fixed before any new code was added:
+
+- **Test 2 (`selecting, renaming, and deleting a demo case makes no API request`)** - the mock previously returned `seedCaseSummaries()` (three demo `WireCaseSummary` objects). `mapCaseSummary` materializes those into `Case` objects with `chatHistory: []`, so selecting the demo and reading its history yielded an empty chat. Changed the mock to return `[]` so the App's `seedCases` fallback fires (the bundled seed cases carry the canonical "Comprei um celular com defeito na tela. O que faco?" opening). The test still asserts only one `GET /api/cases` call is made, preserving the demo-CRUD-stays-local contract.
+- **Test 6 (`starting a new consultation or selecting another case clears a pending blocked retry`)** - `sendChatMessage` used `screen.getByPlaceholderText` (sync) immediately after a tab change, so the input field had not rendered yet. Promoted the helper to async with `await screen.findByPlaceholderText(...)` and added `await` to all 9 callers.
+- **Test 7 (`starting a quick-guide consultation while a real case is active`)** - `@testing-library/dom` v10+ requires an exact name match by default. The quick-guide button's accessible name is the concatenation of the `<h4>` title and the `<p>` description. Switched the `name` option to a regex anchored on the title prefix.
+- **Plus a 4th** (uncovered until the first round) - the test 6 mock had no handler for `GET /api/cases/${REAL_ID}`. The handler returned `{error: 'unexpected'}` 500 for the `selectRealCase('Atraso na entrega')` step, which short-circuited the `handleSelectCase` flow (failed `apiClient.getCase` ⇒ no `setActiveTab('conversar')` ⇒ the chat input was not on screen). Added a dedicated GET handler returning a `caseResponse(REAL_ID, 'Atraso na entrega', ...)` fixture; the test's `calls.some((c) => c.url === '/api/cases/${REAL_ID}' && c.method === 'GET')` assertion then resolved, and the subsequent `sendChatMessage('O prazo continua igual?')` correctly posted with `session_id: REAL_ID`.
+
+### Files added (batch 7)
+
+- `base_frontend/src/api.ts` (245 lines) - Typed HTTP client (`apiClient`) covering `POST /api/chat/structured`, `GET /api/cases`, `GET/PATCH/DELETE /api/cases/{id}`, `GET /api/cases/{id}/history`. Exports wire types (`WireCaseSummary`/`WireCaseResponse`/`WireChatMessage`/`WireStructuredChatRequest`/`WireStructuredChatResponse`) and the `mapStructuredResponse`/`mapCaseSummary`/`deriveLastMessage`/`deriveTagText`/`formatCaseDate` adapters that translate snake_case wire payloads to the camelCase `Case` domain type.
+- `base_frontend/src/api.test.ts` (267 lines) - 15 Vitest tests for the API client. Pins URL construction (template literals with `caseId` interpolation), request body shape (snake_case keys, optional `title`/`icon_name` only present on auto-create), error handling for non-2xx (response object returned, not thrown), and the `delete`/`history` round-trips.
+- `base_frontend/src/App.test.tsx` (508 lines) - 8 Vitest integration tests for the rewritten `App`. Uses a `setupFetch` helper that stubs `globalThis.fetch` and records every call (`url`, `method`, `body` as `Record<string, unknown>`) so assertions can verify request shape. Covers: demo-empty `listCases` response, demo CRUD stays local (only one `GET /api/cases` per render), demo-active sending posts `session_id: null` with auto-create metadata, first successful message synthesizes a real case without a separate `GET /api/cases/{id}`, blocked first message + retry reuses the returned `session_id` with original metadata, blocked retry clears on `Nova Consulta Inteligente` or selecting another real case, quick-guide consultation opens a new session without mutating the active case, real case CRUD round-trips via PATCH and DELETE.
+- `base_frontend/src/defaults.ts` (103 lines) - `initialPreferences` and `seedCases` (moved out of `App.tsx`'s inline definitions). The 3 seed cases are flagged `is_demo: true` so the App's local-only CRUD path is taken.
+
+### Files modified (batch 7)
+
+- `base_frontend/src/App.tsx` (524 lines) - **REFACTORED.** Top-level React component wired to the `apiClient`. Loads real cases on mount (`apiClient.listCases()`), falls back to `seedCases` when none exist. Owns the demo-vs-real case dispatch (demos stay local; real cases hit `/api/cases/{id}`), the pending-blocked-retry ref (set on a blocked first response, cleared on `handleStartConsultation` or selecting a different case, reused on the next send), the per-case `currentChatHistory` state, the `handleSendMessage` dispatcher with auto-create metadata derivation, the `deriveCaseMeta` heuristic, the toast UI, and the `preferences` state (with the PATCH-back-to-server on responseStyle change). Drives `apiClient.chatStructured` for messaging.
+- `base_frontend/src/components/ChatInterface.tsx` (385 lines) - Renamed `isLoading` prop to `isSendingMessage` to match the App state name (was an internal name; now matches the public App state).
+- `base_frontend/src/types.ts` (55 lines) - Added `is_demo?: boolean` on `Case` (ISSUE-M3-005 marker for the three seed demos). No other type changes.
+- `base_frontend/src/test/setup.ts` (5 lines) - Added a no-op `Element.prototype.scrollIntoView` polyfill (jsdom does not implement it; `ChatInterface` calls it on every chat update). The feature-detect (`if (!Element.prototype.scrollIntoView)`) keeps the polyfill a no-op on a real browser.
+- `base_frontend/AGENTS.md` - Updated File Map to mark App/components/types as **REFACTORED (batch 7)**, api/defaults/api.test.ts/App.test.tsx as **NEW (batch 7)**, and `server.ts` as **DELETED (batch 7)**. Updated the `Ownership` section, `Local Contracts` (test/lint language), `Work Guidance` file map (with new content for each row), and `Verification` block.
+- `AGENTS.md` (root) - File Map expanded with the 4 NEW batch 7 rows (api.ts, api.test.ts, App.test.tsx, defaults.ts), the 3 REFACTORED batch 7 rows (App.tsx, components/*.tsx, types.ts), and the existing batch 6 rows updated for batch 7 completion (`tsconfig.json` exclude now noted as no-op, `test/setup.ts` polyfill noted, `AGENTS.md` row updated). The `server.ts` row is rewritten from "TO BE DELETED" to "DELETED". The Project Overview's batch 7 sentence is added, with a closing "(batch 7 verification: ...)" gate log.
+
+### Files deleted (batch 7)
+
+- `base_frontend/server.ts` (330 lines) - The Express + `@google/genai` server is gone. The rewritten `package.json` (batch 6) no longer references it, and the `tsconfig.json` `exclude: ["server.ts"]` is now a no-op (kept for historical clarity; could be cleaned up in a future batch). The FastAPI server now serves the production `dist/` build via its `REACT_DIST` static mount (see `src/advogado_de_bolso/api.py`).
+- `base_frontend/test_output.txt` - Leftover artifact from the previous subagent (a captured `npm run test` log). Deleted alongside `server.ts`.
+- `base_frontend/dist/` - Deleted at the start of this round to ensure `npm run build` produced a clean bundle for the final gate check.
+
+### Files NOT modified (deferred to batch 8+)
+
+- `Makefile` (project root) - still not created; plan 20 step 8 assigns this to batch 8. The lockfile is ready (`npm ci` is reproducible).
+- `base_frontend/server.ts` references in code - none remain (the only `server.ts` mention in `tsconfig.json` is the `exclude` array, kept as a no-op historical marker).
+- `tsconfig.json` `exclude: ["server.ts"]` entry - kept as a no-op; cleanup is safe but cosmetic.
+- `vite.config.ts` `as any` cast on the plugins array - same known vitest+vite peer-dep issue; cast is type-only.
+
+### Known follow-ups (batch 7 → batch 8)
+
+- `Makefile` is still missing (batch 8). The lockfile is ready; the `npm ci` and `npm run build` targets will be reproducible.
+- `tsconfig.json` `exclude: ["server.ts"]` could be removed now that the file is gone (cosmetic).
+- The integration tests stub `globalThis.fetch` and verify request shape; once the FastAPI server has a test harness (no plans yet), an end-to-end suite against a real or in-process server would be the next step.
+- `base_frontend/dist/` is rebuilt on every `npm run build`; the FastAPI server's `REACT_DIST` static mount (see `src/advogado_de_bolso/api.py`) will pick it up on the next server restart.
+
