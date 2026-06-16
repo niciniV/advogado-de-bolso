@@ -126,8 +126,8 @@ export default function ProfilePreferences({
             <div className="text-xs text-slate-600 space-y-3 leading-relaxed max-h-60 overflow-y-auto">
               {activeModal === "privacy" ? (
                 <>
-                  <p><strong>Privacidade e Sigilo:</strong> O Advogado de Bolso coleta as informações relatadas em suas consultas apenas para aprimoramento local com a inteligência artificial, não compartilhando dados sensíveis com terceiros.</p>
-                  <p>Nenhuma informação como nome completo, CPF, números de cartão de crédito ou links bancários é exigida. Evite digitar dados estritamente confidenciais nas conversas.</p>
+                  <p><strong>Privacidade e Sigilo:</strong> As mensagens que você envia são encaminhadas ao provedor de inteligência artificial configurado no servidor (por padrão, a API do Google/Gemini) para gerar a resposta. O servidor não envia a sua chave de API ao navegador. As conversas finalizadas são salvas como arquivos JSON no diretório configurado por <code>CASES_PATH</code> no servidor e podem ser excluídas a qualquer momento pela interface ou pela API. Nenhuma informação como nome completo, CPF, números de cartão de crédito ou links bancários é exigida. Evite digitar dados estritamente confidenciais.</p>
+                  <p>Recomendamos não inserir dados pessoais sensíveis; o sistema foi projetado para orientações jurídicas gerais, não para consultoria individualizada.</p>
                   <p>Você pode excluir suas consultas salvas a qualquer momento na tabela de casos clicando no botão de exclusão lixeira, removendo definitivamente todo o histórico registrado localmente.</p>
                 </>
               ) : (
