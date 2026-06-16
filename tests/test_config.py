@@ -27,6 +27,12 @@ class TestSettingsDefaults:
         assert isinstance(s.cases_path, Path)
         assert s.cases_path == Path("./storage/cases")
 
+    def test_default_react_dist_is_path(self):
+        s = Settings()
+        assert isinstance(s.react_dist, Path)
+        assert s.react_dist.name == "dist"
+        assert s.react_dist.parent.name == "base_frontend"
+
     @pytest.mark.parametrize("value", [0, -1, 51])
     def test_retrieval_top_k_is_bounded(self, value: int):
         with pytest.raises(ValidationError):
@@ -38,6 +44,14 @@ class TestCasesPathOverride:
         s = Settings(CASES_PATH=str(tmp_path / "my_cases"))
         assert isinstance(s.cases_path, Path)
         assert s.cases_path == tmp_path / "my_cases"
+
+
+class TestReactDistOverride:
+    def test_react_dist_override_is_path(self, tmp_path: Path) -> None:
+        target = tmp_path / "frontend_dist"
+        s = Settings(REACT_DIST=str(target))
+        assert isinstance(s.react_dist, Path)
+        assert s.react_dist == target
 
 
 class TestThinkingLevelValidation:

@@ -541,17 +541,14 @@ class TestSPAFallback:
         dist = tmp_path / "base_frontend" / "dist"
         (dist / "assets").mkdir(parents=True)
         (dist / "index.html").write_text("<html><body>Advogado de Bolso</body></html>")
-        # Patch REACT_DIST resolution via env (we can't easily monkeypatch
-        # the module-level constant, so we patch the path used in
-        # create_app by setting it via Settings... actually REACT_DIST
-        # is a module constant. Workaround: patch the file at the path
-        # the api module resolves by ensuring the project layout has a
-        # dist directory, OR patch the module attribute.)
-        from advogado_de_bolso import api as api_module
+        # `react_dist` is now sourced from `Settings` (env var `REACT_DIST`).
+        # We pass a fresh Settings with REACT_DIST set, since the cached
+        # `get_settings()` singleton may have been populated at api-module
+        # import time without the env var.
+        from advogado_de_bolso.config import Settings
 
-        monkeypatch.setattr(api_module, "REACT_DIST", dist)
-
-        with TestClient(create_app(service=FakeService())) as client:
+        settings = Settings(REACT_DIST=str(dist))
+        with TestClient(create_app(service=FakeService(), settings=settings)) as client:
             response = client.get("/")
         assert response.status_code == 200
         assert "Advogado de Bolso" in response.text
@@ -579,11 +576,10 @@ class TestSPAFallback:
         (dist / "assets").mkdir(parents=True)
         (dist / "assets" / "main.js").write_text("// bundled js")
         (dist / "index.html").write_text("<html></html>")
-        from advogado_de_bolso import api as api_module
+        from advogado_de_bolso.config import Settings
 
-        monkeypatch.setattr(api_module, "REACT_DIST", dist)
-
-        with TestClient(create_app(service=FakeService())) as client:
+        settings = Settings(REACT_DIST=str(dist))
+        with TestClient(create_app(service=FakeService(), settings=settings)) as client:
             response = client.get("/assets/main.js")
         assert response.status_code == 200
         assert "main.js" in response.text or "bundled" in response.text

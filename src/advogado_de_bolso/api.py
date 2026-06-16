@@ -10,8 +10,9 @@ Endpoints:
 - GET /api/cases/{case_id}/history (UUID) -> list[ChatMessage]
 - GET /api/health
 
-Static serving mounts /assets if `base_frontend/dist` exists. SPA fallback
-excludes /api and /assets via first-segment matching.
+Static serving mounts /assets if the configured `REACT_DIST` (from
+`Settings.react_dist`) exists. SPA fallback excludes /api and /assets
+via first-segment matching.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Annotated, Any, Protocol
 from uuid import UUID
 
@@ -43,13 +43,6 @@ from advogado_de_bolso.service import ChatResult, build_chat_service
 from advogado_de_bolso.storage.cases import Case
 
 logger = logging.getLogger(__name__)
-
-
-# `api.py` lives at `<project_root>/src/advogado_de_bolso/api.py`, so:
-#   .parent              → .../advogado_de_bolso/
-#   .parent.parent       → .../src/
-#   .parent.parent.parent → <project_root>
-REACT_DIST = Path(__file__).parent.parent.parent / "base_frontend" / "dist"
 
 
 # ---------------------------------------------------------------------------
@@ -263,10 +256,11 @@ def create_app(
     # Static / SPA fallback
     # -----------------------------------------------------------------------
 
-    if REACT_DIST.exists():
+    react_dist = app_settings.react_dist
+    if react_dist.exists():
         app.mount(
             "/assets",
-            StaticFiles(directory=REACT_DIST / "assets"),
+            StaticFiles(directory=react_dist / "assets"),
             name="react-assets",
         )
 
@@ -275,7 +269,7 @@ def create_app(
         first_segment = full_path.split("/", 1)[0] if full_path else ""
         if first_segment in {"api", "assets"}:
             raise HTTPException(status_code=404, detail="Not Found")
-        index = REACT_DIST / "index.html"
+        index = react_dist / "index.html"
         if not index.exists():
             raise HTTPException(
                 status_code=500,
