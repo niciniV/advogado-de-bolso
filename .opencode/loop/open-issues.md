@@ -2958,3 +2958,56 @@ Note: this project uses an alternative batch numbering (1=contracts, 2=schemas+a
   - The CLI does not currently support explicit `response_style` selection — the in-memory case default is hardcoded to `"detalhado"` and there is no `/estilo simples` slash command. Adding a style switch is a UX follow-up; the LLM-bound `model_history` and persistence are already wired so the change is non-breaking.
   - The CLI's spinner uses `console.status`; tests do not exercise the Rich UI surface. Manual smoke-testing in a real terminal is the only check for the spinner/live UX (no headless test driver for `rich.live`).
 
+## Implementation Notes → Batch 6 (Frontend dependency batch)
+
+### Status
+
+- **complete;** gate `npm install` / `npm run lint` / `npm run build` all green. `npm run test` correctly reports "No test files found" (batch 7 will add test files; this is the expected batch 6 state).
+- **Implementation date:** 2026-06-15
+- **Subagent:** implementation (round 28)
+
+Batch 6 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.md`) is now complete. The frontend build config is rewired from the legacy `server.ts` (Express + `@google/genai`) architecture to the FastAPI + Vite SPA architecture. No source code (`src/advogado_de_bolso/*` or `base_frontend/src/*.tsx`) was touched — that is batch 7's job. The lockfile is generated and committed so the eventual `Makefile` `npm ci` target (batch 8) is reproducible.
+
+### Files added
+
+- `base_frontend/src/test/setup.ts` - **NEW (batch 6).** Single line: `import "@testing-library/jest-dom/vitest";`. Loaded once per Vitest run via `test.setupFiles: ["./src/test/setup.ts"]` in `vite.config.ts`.
+- `base_frontend/AGENTS.md` - **NEW (batch 6).** Child DOX for the frontend. Documents the build configuration, the Vite dev-server proxy to the FastAPI server on port 8000, the Vitest test setup, and the npm scripts. Cross-references the backend API (`src/advogado_de_bolso/api.py`), the wire types (`schemas.py`), and the batch 7 plan files (`13-frontend-app.md`, `14-frontend-tests.md`).
+
+### Files modified
+
+- `base_frontend/package.json` - **REWRITTEN (batch 6).** Per `.opencode/plans/10-frontend-build-and-config.md` (ISSUE-M3-004). Scripts: `"dev": "vite"` (was `"tsx server.ts"`), `"build": "vite build"` (was `"vite build && esbuild server.ts --bundle ... --outfile=dist/server.cjs"`), `"start"` REMOVED, `"clean": "rm -rf dist"` (was `"rm -rf dist server.js"`), `"preview": "vite preview"` (kept), `"lint": "tsc --noEmit"` (kept), `"test": "vitest run"` (new). `dependencies` removed: `@google/genai`, `express`, `dotenv`, `motion`. `devDependencies` removed: `tsx`, `esbuild`, `@types/express`. `devDependencies` added: `vitest@^2.1.5` (resolved to 2.1.9), `jsdom@^25.0.0` (resolved to 25.0.1), `@testing-library/react@^16.0.1` (resolved to 16.3.2), `@testing-library/jest-dom@^6.5.0` (resolved to 6.9.1). `devDependencies` retained: `@types/node@^22.14.0` (ISSUE-USR-014 — `vite.config.ts` still uses `path`/`__dirname`/`process.env`, and the `npm run lint` `tsc --noEmit` gate needs Node ambient types). Renamed `name` from `react-example` → `advogado-de-bolso-frontend` and bumped `version` to `0.1.0`.
+- `base_frontend/vite.config.ts` - **UPDATED (batch 6).** Added `server.proxy = { "/api": { target: "http://localhost:8000", changeOrigin: true } }` (ISSUE-DS-003) so Vite dev mode (port 5173) forwards `/api/*` calls to the FastAPI server (port 8000). Added `test: { environment: "jsdom", setupFiles: ["./src/test/setup.ts"], globals: true }` per the plan spec. Changed `defineConfig` import from `'vite'` → `'vitest/config'` (the plan explicitly requires `vitest/config` because the test block is Vitest-specific). Kept the existing `path`/`__dirname`/`process.env` usage and the `@tailwindcss/vite`/`@vitejs/plugin-react` plugins unchanged.
+- `base_frontend/tsconfig.json` - **UPDATED (batch 6).** Added `"types": ["vitest/globals", "@testing-library/jest-dom"]` under `compilerOptions` so `tsc --noEmit` knows the Vitest globals (`describe`/`it`/`expect`/etc.) and the jest-dom matcher augmentations. Added `"exclude": ["node_modules", "server.ts"]` to suppress the `server.ts` import errors for the three removed packages (`express`, `@google/genai`, `dotenv`); `server.ts` is deleted in batch 7, at which point the exclude becomes a no-op. Did NOT add `"strict": true` (project convention).
+- `base_frontend/package-lock.json` - **NEW (batch 6, generated).** 158 KB. Committed so the eventual `Makefile` `npm ci` target is reproducible. Generated via `npm install` (NOT `npm ci`) because the lockfile did not exist before this batch.
+- `AGENTS.md` (root) - File Map expanded with seven new frontend rows: `base_frontend/package.json`, `package-lock.json`, `vite.config.ts`, `tsconfig.json`, `src/test/setup.ts`, `AGENTS.md`, and the `TO BE DELETED (batch 7)` entry for `server.ts`. Project Overview paragraph extended with the batch 6 sentence. Child DOX Index gains a `base_frontend/` row pointing at the new `base_frontend/AGENTS.md`.
+
+### Files NOT modified (deferred to batch 7)
+
+- `base_frontend/server.ts` - still on disk; deleted in batch 7 along with its imports of `express`, `@google/genai`, and `dotenv`. The current `tsconfig.json` `exclude` keeps it out of `tsc --noEmit`.
+- `base_frontend/src/App.tsx` and `src/components/*.tsx` - React components unchanged; the new API client integration is batch 7.
+- `base_frontend/src/api.ts`, `src/defaults.ts`, `src/api.test.ts`, `src/App.test.tsx` - all NEW files in batch 7.
+- The root `Makefile` - **deferred to batch 8** (plan 20 step 8: "Operations/docs batch: add the `Makefile`"). Plan 10 includes the Makefile spec text but plan 20 is the authoritative batch assignment. The lockfile is already generated in this batch, so the `Makefile` `npm ci` target will be reproducible when batch 8 lands.
+
+### Gate verification (batch 6)
+
+- `cd base_frontend && npm install` - **312 packages added, no errors.** 5 pre-existing moderate/high/critical vulnerabilities from `@google/genai` transitive deps are now gone (the package was removed). Remaining 5 vulnerabilities are from `jsdom` / `esbuild` / `vite` dev-only paths and are not exploitable in the SPA build.
+- `cd base_frontend && npm run lint` (`tsc --noEmit`) - **passes** (no output = success). `server.ts` is excluded; all other `.ts`/`.tsx` files type-check.
+- `cd base_frontend && npm run build` (`vite build`) - **passes.** 1677 modules transformed; `dist/index.html` (0.41 kB), `dist/assets/index-B2xIAcMx.css` (31.44 kB), `dist/assets/index-BxQKL6_-.js` (250.94 kB); built in 1.79s. Vite 6.4.3 (the project's pinned version) is used.
+- `cd base_frontend && npm run test` (`vitest run`) - **expected to fail with "No test files found, exiting with code 1"** — this is the correct batch 6 state; test files are added in batch 7. The command runs Vitest end-to-end (proving the test setup wiring is correct) but finds zero matching test files.
+
+### Plan spec deviations (batch 6)
+
+- **`vite.config.ts` plugins cast** - The plugins array `[react(), tailwindcss()]` is cast to `as any` to bridge the nominal-type mismatch between the project's `vite@6.2.3` (the `Plugin` type returned by `react()` and `tailwindcss()`) and `vitest@2.1.9`'s bundled `vite@5.4.21` (the `Plugin` type expected by `defineConfig` from `vitest/config`). This is a known vitest+vite peer-dep issue and the cast is type-only — the runtime config is correct. The plan spec did not anticipate this; without the cast, `tsc --noEmit` fails with `TS2769: No overload matches this call` on a chain of nominal-type errors.
+- **`tsconfig.json` `exclude: ["server.ts"]`** - The plan did not specify the exclude, but `server.ts` (still on disk in batch 6) imports `express`, `@google/genai`, and `dotenv` — all removed from the new `package.json`. The exclude keeps the file out of the `tsc --noEmit` gate. Batch 7 deletes the file, making the exclude a no-op (but harmless).
+- **Package name** - Renamed from `react-example` → `advogado-de-bolso-frontend` and `version` bumped from `0.0.0` → `0.1.0` to reflect the new project identity. The plan did not specify these fields; the old values were scaffolding placeholders.
+- **Vite, `@vitejs/plugin-react`, `lucide-react`, `react`, `react-dom`, `@tailwindcss/vite`** are kept in `dependencies` (where the old `package.json` had them). The plan did not say to move them to `devDependencies`. The duplication of `vite` in both `dependencies` and `devDependencies` is preserved as-is from the old file; npm dedupes the install. Batch 7+ may clean this up.
+- **Vitest 2.1.5 (resolved to 2.1.9)** is used instead of the latest 3.x. Vitest 2.1.x is the latest line that ships with `vite@5.4.21` as a peer dep and is fully compatible with the project's `vite@6.2.3`. Vitest 3.x has a stricter peer-dep range that conflicts with the project's lockfile.
+
+### Known follow-ups (batch 6 → batch 7)
+
+- `npm run test` is correctly wired to `vitest run` and will start passing once batch 7 adds `src/api.test.ts` and `src/App.test.tsx`.
+- `tsconfig.json` `exclude: ["server.ts"]` should be removed in batch 7 once `server.ts` is deleted.
+- The `as any` cast on the `vite.config.ts` plugins array is a known type-only workaround; if a future Vitest release aligns its bundled Vite version with the project's pinned Vite 6.2.3, the cast can be removed.
+- The `Makefile` (plan 10's spec, plan 20's batch 8) is NOT created in this batch. The lockfile is ready for it.
+- `base_frontend/dist/` is now produced by `npm run build`; the FastAPI server's `REACT_DIST` static mount (see `src/advogado_de_bolso/api.py`) will pick it up on the next server restart. The Vite dev-server proxy means the API can be developed against the real FastAPI server during dev iteration.
+
