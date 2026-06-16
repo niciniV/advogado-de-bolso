@@ -9,7 +9,9 @@ interface web responsiva e busca em uma base local de documentos.
 ## Inicio rapido
 
 Requisitos: Python 3.11 ou superior, [uv](https://docs.astral.sh/uv/),
-Node.js 20+ e npm 10+.
+Node.js 20+ e npm 10+. O `Makefile` na raiz e um wrapper opcional multiplataforma;
+em Windows PowerShell sem `make` use os comandos diretos da secao
+[Sem make (PowerShell)](#sem-make-powershell) abaixo.
 
 ```powershell
 uv sync --extra dev --cache-dir .uv-cache
@@ -39,6 +41,50 @@ Abra `http://127.0.0.1:8000`. Para usar somente o terminal:
 
 ```powershell
 uv run --cache-dir .uv-cache advogado
+```
+
+### Sem make (PowerShell)
+
+Se `make` nao estiver instalado (comum em Windows PowerShell padrao), use
+os comandos abaixo, que sao exatamente o que cada alvo do `Makefile` executa.
+
+**Setup unico** (depois de clonar o repositorio):
+
+```powershell
+uv sync --extra dev --cache-dir .uv-cache
+if (Test-Path .env.example) { Copy-Item .env.example .env }
+# edite .env e preencha GEMINI_API_KEY
+uv run --cache-dir .uv-cache python -m advogado_de_bolso.ingest
+```
+
+**Build do frontend** (substitui `make frontend`):
+
+```powershell
+cd base_frontend ; npm ci ; npm run build ; cd ..
+```
+
+**Subir a API em producao** (substitui `make dev-api`):
+
+```powershell
+uv run --cache-dir .uv-cache advogado-api
+```
+
+**Desenvolvimento com hot-reload** (substitui `make dev`). Abra dois
+terminais PowerShell em paralelo:
+
+```powershell
+# Terminal 1 — API FastAPI em :8000
+uv run --cache-dir .uv-cache advogado-api
+
+# Terminal 2 — Vite dev server em :5173 com proxy /api -> :8000
+cd base_frontend ; npm run dev
+```
+
+**Em uma unica linha** (somente se ja tiver o setup acima feito e quiser
+build + start em sequencia):
+
+```powershell
+cd base_frontend ; npm ci ; npm run build ; cd .. ; uv run --cache-dir .uv-cache advogado-api
 ```
 
 ## Conexao com um frontend
