@@ -2992,7 +2992,7 @@ Batch 6 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.
 
 - `cd base_frontend && npm install` - **312 packages added, no errors.** 5 pre-existing moderate/high/critical vulnerabilities from `@google/genai` transitive deps are now gone (the package was removed). Remaining 5 vulnerabilities are from `jsdom` / `esbuild` / `vite` dev-only paths and are not exploitable in the SPA build.
 - `cd base_frontend && npm run lint` (`tsc --noEmit`) - **passes** (no output = success). `server.ts` is excluded; all other `.ts`/`.tsx` files type-check.
-- `cd base_frontend && npm run build` (`vite build`) - **passes.** 1677 modules transformed; `dist/index.html` (0.41 kB), `dist/assets/index-B2xIAcMx.css` (31.44 kB), `dist/assets/index-BxQKL6_-.js` (250.94 kB); built in 1.79s. Vite 6.4.3 (the project's pinned version) is used.
+- `cd base_frontend && npm run build` (`vite build`) - **passes.** 1677 modules transformed; `dist/index.html` (0.41 kB) plus the bundle and CSS written to `dist/assets/`; built in 1.79s. Vite 6.4.3 (the project's pinned version) is used.
 - `cd base_frontend && npm run test` (`vitest run`) - **expected to fail with "No test files found, exiting with code 1"** — this is the correct batch 6 state; test files are added in batch 7. The command runs Vitest end-to-end (proving the test setup wiring is correct) but finds zero matching test files.
 
 ### Plan spec deviations (batch 6)
@@ -3013,16 +3013,16 @@ Batch 6 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.
 
 ## Implementation Notes → Batch 7 (Frontend integration)
 
-Batch 7 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.md`) is now complete. The React frontend is rewired to consume the FastAPI backend directly: a typed `apiClient` covers every endpoint the UI needs, the top-level `App` component dispatches per-case CRUD (local for demos, HTTP for real cases), the `ChatInterface` adopts the renamed `isSendingMessage` prop, and the new `App.test.tsx` (8 integration tests) plus `api.test.ts` (15 client tests) close the loop on the vite build config landed in batch 6. `base_frontend/server.ts` is deleted; the FastAPI server now serves the production build.
+Batch 7 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.md`) is now complete. The React frontend is rewired to consume the FastAPI backend directly: a typed `apiClient` covers every endpoint the UI needs, the top-level `App` component dispatches per-case CRUD (local for demos, HTTP for real cases), the `ChatInterface` adopts the renamed `isSendingMessage` prop, and the new `App.test.tsx` (12 integration tests) plus `api.test.ts` (15 client tests) close the loop on the vite build config landed in batch 6. `base_frontend/server.ts` is deleted; the FastAPI server now serves the production build.
 
 - **Implementation date:** 2026-06-16
 - **Subagent:** implementation (round 29)
 
 ### Gate verification (batch 7)
 
-- `cd base_frontend && npm run test` - **23/23 pass** (`src/api.test.ts` 15 + `src/App.test.tsx` 8). 0 skipped, 0 failed. Coverage spans URL building, request body shape, non-2xx error handling, the demo→real handoff on `listCases` response, pending-blocked-retry ref management, demo CRUD staying local, real case CRUD dispatching to `/api/cases/{id}`, auto-create metadata on the first chat, the `Nova Consulta Inteligente` and quick-guide flows not mutating the active case, and rename/delete round-trips for real cases.
+- `cd base_frontend && npm run test` - **27/27 pass** (`src/api.test.ts` 15 + `src/App.test.tsx` 12). 0 skipped, 0 failed. Coverage spans URL building, request body shape, non-2xx error handling, the demo→real handoff on `listCases` response, pending-blocked-retry ref management, demo CRUD staying local, real case CRUD dispatching to `/api/cases/{id}`, auto-create metadata on the first chat, the `Nova Consulta Inteligente` and quick-guide flows not mutating the active case, and rename/delete round-trips for real cases.
 - `cd base_frontend && npm run lint` (`tsc --noEmit`) - **passes** (no output = success). The only `tsc` adjustment was tightening `FetchCall.body` from `unknown` to `Record<string, unknown>` in the test helper so `call.body?.message` / `.session_id` accesses are typed (10 inferred `unknown`-property errors in the pre-existing test handler were caught and fixed).
-- `cd base_frontend && npm run build` (`vite build`) - **passes.** 1679 modules transformed; `dist/index.html` (0.41 kB), `dist/assets/index-CHZYQSCy.css` (31.44 kB), `dist/assets/index-np8Mnw6N.js` (253.76 kB); built in 2.35s. The FastAPI server's `REACT_DIST` static mount picks up the new bundle.
+- `cd base_frontend && npm run build` (`vite build`) - **passes.** 1679 modules transformed; `dist/index.html` (0.41 kB) plus the bundle and CSS written to `dist/assets/`; built in 2.35s. The FastAPI server's `REACT_DIST` static mount picks up the new bundle.
 
 ### Test fixes applied during this round
 
@@ -3081,7 +3081,7 @@ Batch 8 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.
 
 ### Files modified (batch 8)
 
-- `README.md` (rewritten, 161 -> 270 lines) - Replaces the pre-batch-4 in-memory-session story with the new endpoint set, wire examples, persistence semantics, and frontend section. Concretely:
+- `README.md` (rewritten, 161 -> 273 lines) - Replaces the pre-batch-4 in-memory-session story with the new endpoint set, wire examples, persistence semantics, and frontend section. Concretely:
   - **Endpoints table** now lists `GET /api/health`, `POST /api/chat/structured`, `GET /api/cases`, `GET /api/cases/{case_id}` (UUID), `PATCH /api/cases/{case_id}` (UUID), `DELETE /api/cases/{case_id}` (UUID, 204), `GET /api/cases/{case_id}/history` (UUID), and `GET /docs`. The old `POST /api/chat` and `DELETE /api/sessions/{session_id}` rows are gone.
   - **Wire example** uses the `StructuredChatRequest`/`StructuredChatResponse` shape: request body `{message, session_id, response_style, title?, icon_name?}`; 200 response with full `StructuredChatResponse` envelope (`session_id`, `updated_at`, `chat_history`, `step_title`, `step_content`, `relevant_title`, `relevant_content`, `deadline`, `questions`, `suggestive_text`, `template_letter`, `quick_replies`); 422 blocked envelope (`{session_id, updated_at, chat_history, blocked: true, blocked_message}`). CRUD examples cover PATCH (200 / 404 / 422) and DELETE (204 / 404) with the UUID-typed path params.
   - **Frontend section** replaces the old `src/advogado_de_bolso/frontend` reference with the React + Vite + TypeScript SPA at `base_frontend/`, documents the Vite dev-server proxy (`/api/*` -> `http://localhost:8000` per `base_frontend/vite.config.ts`), the parallel `make dev` workflow, and the production mount (`base_frontend/dist/` served by FastAPI on :8000 via the `REACT_DIST` static mount in `api.py`).
@@ -3109,7 +3109,7 @@ Batch 8 of the 9-batch gated plan (see `.opencode/plans/20-implementation-order.
 ### Plan spec deviations (batch 8)
 
 - The `dev-api` target uses `uv run --cache-dir .uv-cache advogado-api` (matches the existing `Inicio rapido` invocation in the previous README, and matches the `uv 0.8.11` setup used during the integration loop). The plan spec at `.opencode/plans/10-frontend-build-and-config.md` lists plain `uv run advogado-api`; the cache-dir form is what the project has been using throughout the gated batches and is documented in the README's `Inicio rapido` section and the committed `.gitignore`, so the cached form is kept for consistency.
-- `README.md` is 270 lines (vs ~161 in the pre-batch-8 state). The growth is driven by the larger endpoints table, the structured wire examples, the persistence section with deployment caveats, the Make targets table, and the dual-backend / dual-frontend quality-gates block. The plan did not pin a target line count.
+- `README.md` is 273 lines (vs ~161 in the pre-batch-8 state). The growth is driven by the larger endpoints table, the structured wire examples, the persistence section with deployment caveats, the Make targets table, and the dual-backend / dual-frontend quality-gates block. The plan did not pin a target line count.
 
 ### Known follow-ups (batch 8 -> batch 9)
 
