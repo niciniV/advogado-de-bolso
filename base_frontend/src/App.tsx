@@ -85,15 +85,17 @@ export default function App() {
   }, [toast.show]);
 
   // ISSUE-M3-017: load real cases on mount. Show seedCases only if no real cases are returned.
+  // NEX-001: non-clobbering - if the user has already created a real case in the meantime,
+  // do not overwrite it with the late listCases response.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const real = await apiClient.listCases();
         if (cancelled) return;
-        setCases(real.length > 0 ? real : seedCases);
+        setCases((prev) => (prev.length === 0 ? (real.length > 0 ? real : seedCases) : prev));
       } catch {
-        if (!cancelled) setCases(seedCases);
+        if (!cancelled) setCases((prev) => (prev.length === 0 ? seedCases : prev));
       } finally {
         if (!cancelled) setIsLoadingCases(false);
       }
@@ -262,14 +264,22 @@ export default function App() {
       text,
       timestamp: Date.now(),
     };
-    const updatedHistory = [...currentChatHistory, userMsg];
-    setCurrentChatHistory(updatedHistory);
+    // NEX-002: a quick-guide send (forceNewCase) or a demo-active send starts a brand new
+    // consultation - do not let the previous case's history leak into the optimistic view.
+    const optimisticHistory =
+      forceNewCase || demoActive ? [userMsg] : [...currentChatHistory, userMsg];
+    setCurrentChatHistory(optimisticHistory);
     setIsSendingMessage(true);
 
+    // NEX-003: when sending to an existing real case, prefer the case's persisted
+    // response_style over the global preference so we do not override a per-case setting.
+    const activeRealCase = activeCaseId ? cases.find((c) => c.id === activeCaseId) : null;
+    const caseResponseStyle =
+      activeRealCase && !isDemoCase(activeRealCase) ? activeRealCase.responseStyle : null;
     const wirePayload: WireStructuredChatRequest = {
       message: text,
       session_id: sessionId,
-      response_style: firstCreateMeta?.responseStyle ?? preferences.responseStyle,
+      response_style: firstCreateMeta?.responseStyle ?? caseResponseStyle ?? preferences.responseStyle,
     };
     if (firstCreateMeta) {
       wirePayload.title = firstCreateMeta.title;
@@ -344,7 +354,25 @@ export default function App() {
       return;
     }
 
-    const mapped = mapStructuredResponse(body as Parameters<typeof mapStructuredResponse>[0]);
+    // NEX-004: guard the adapter - a 200 with malformed JSON / missing fields can throw
+    // and leave isSendingMessage stuck. Reset state and surface a generic assistant error.
+    let mapped: ReturnType<typeof mapStructuredResponse> | null = null;
+    try {
+      mapped = mapStructuredResponse(body as Parameters<typeof mapStructuredResponse>[0]);
+    } catch (err) {
+      console.error("Failed to map structured response", err);
+      setCurrentChatHistory((prev) => [
+        ...prev,
+        {
+          id: `bot-err-${Date.now()}`,
+          sender: "assistant",
+          text: "Nao foi possivel processar a resposta do servidor.",
+          timestamp: Date.now(),
+        },
+      ]);
+      setIsSendingMessage(false);
+      return;
+    }
     setCurrentChatHistory(mapped.chatHistory);
     setActiveCaseId(mapped.sessionId);
 

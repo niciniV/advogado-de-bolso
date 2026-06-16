@@ -566,4 +566,186 @@ describe('App frontend integration', () => {
       restore();
     }
   });
+
+  // NEX-001: a late /api/cases resolution must not clobber a case the user just created.
+  it('a delayed /api/cases resolution does not overwrite a real case created in the meantime', async () => {
+    let resolveListCases: (value: Response) => void = () => {};
+    const deferredListCases = new Promise<Response>((resolve) => {
+      resolveListCases = resolve;
+    });
+    const {calls, restore} = renderApp(async (allCalls) => {
+      const call = allCalls[allCalls.length - 1];
+      if (call.url === '/api/cases' && allCalls.filter((c) => c.url === '/api/cases').length === 1) {
+        return deferredListCases;
+      }
+      if (call.url === '/api/cases') return jsonResponse<WireCaseSummary[]>([]);
+      if (call.url === '/api/chat/structured') {
+        return chatStructuredResponse(REAL_ID, [
+          userMessage('Fui cobrado duas vezes.'),
+          assistantMessage('Voce pode pedir a restituicao em dobro.'),
+        ]);
+      }
+      return jsonResponse({error: 'unexpected'}, 500);
+    });
+
+    try {
+      // First send triggers /api/chat/structured; App creates a real case in `cases`.
+      clickConversarTab();
+      await screen.findByText('Inicie sua Consulta de Consumo');
+      await sendChatMessage('Fui cobrado duas vezes.');
+      await waitFor(() => expect(calls.some((c) => c.url === '/api/chat/structured')).toBe(true));
+      await waitFor(() => expect(screen.getByText('Voce pode pedir a restituicao em dobro.')).toBeInTheDocument());
+
+      // NOW release the late /api/cases response - it should be ignored.
+      resolveListCases(jsonResponse<WireCaseSummary[]>([]));
+
+      await waitFor(() => expect(screen.getByText('Voce pode pedir a restituicao em dobro.')).toBeInTheDocument());
+      clickCasesTab();
+      await waitFor(() => expect(screen.getByText('Cobranca indevida')).toBeInTheDocument());
+    } finally {
+      restore();
+    }
+  });
+
+  // NEX-002: a quick-guide send from an active real case must show only the new
+  // user message in the optimistic history, not the previous case's chat.
+  it('a quick-guide send from an active real case clears the optimistic chat history', async () => {
+    const {calls, restore} = renderApp(async (allCalls) => {
+      const call = allCalls[allCalls.length - 1];
+      if (call.url === '/api/cases' && allCalls.filter((c) => c.url === '/api/cases').length === 1) {
+        return jsonResponse<WireCaseSummary[]>([]);
+      }
+      if (call.url === '/api/cases') return jsonResponse<WireCaseSummary[]>([]);
+      if (call.url === '/api/chat/structured') {
+        if (calls.length === 2) {
+          return chatStructuredResponse(REAL_ID, [
+            userMessage('Fui cobrado duas vezes.'),
+            assistantMessage('Resposta do primeiro caso.'),
+          ]);
+        }
+        return chatStructuredResponse(REAL_ID_2, [
+          userMessage('Comprei um celular online e me arrependi. Recebi ontem, mas a loja disse que não aceita devolução.'),
+          assistantMessage('Resposta do guia.'),
+        ]);
+      }
+      return jsonResponse({error: 'unexpected'}, 500);
+    });
+
+    try {
+      clickConversarTab();
+      await screen.findByText('Inicie sua Consulta de Consumo');
+      await sendChatMessage('Fui cobrado duas vezes.');
+      await waitFor(() => expect(calls.some((c) => c.url === '/api/chat/structured')).toBe(true));
+      await waitFor(() => expect(screen.getByText('Resposta do primeiro caso.')).toBeInTheDocument());
+
+      // Quick-guide send - click before the response resolves.
+      clickHomeTab();
+      const quickGuideButton = await screen.findByRole('button', {name: /Celular comprado online de que me arrependi/});
+      fireEvent.click(quickGuideButton);
+
+      // The previous assistant message should be gone from the chat pane.
+      await waitFor(() => expect(screen.queryByText('Resposta do primeiro caso.')).not.toBeInTheDocument());
+      // The new chat history is the user message we just sent (forceNewCase starts fresh).
+      expect(screen.getByText('Comprei um celular online e me arrependi. Recebi ontem, mas a loja disse que não aceita devolução.')).toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  // NEX-003: an existing real case with response_style="simples" must NOT be overridden
+  // by the global preference of "detalhado".
+  it('sending to an existing real case uses the case persisted response_style, not the global preference', async () => {
+    const summary: WireCaseSummary = {
+      id: REAL_ID,
+      title: 'Cobranca indevida',
+      created_at: UPDATED_AT,
+      updated_at: UPDATED_AT,
+      last_message: 'Resposta inicial.',
+      icon_name: 'receipt_long',
+      response_style: 'simples',
+      tag_text: null,
+      is_demo: false,
+    };
+    const simplesCase: WireCaseResponse = {
+      id: REAL_ID,
+      title: 'Cobranca indevida',
+      created_at: UPDATED_AT,
+      updated_at: UPDATED_AT,
+      icon_name: 'receipt_long',
+      response_style: 'simples',
+      chat_history: [
+        userMessage('Fui cobrado duas vezes.'),
+        assistantMessage('Resposta inicial.'),
+      ],
+    };
+    const {calls, restore} = renderApp(async (allCalls) => {
+      const call = allCalls[allCalls.length - 1];
+      if (call.url === '/api/cases' && allCalls.filter((c) => c.url === '/api/cases').length === 1) {
+        return jsonResponse([summary]);
+      }
+      if (call.url === '/api/cases') return jsonResponse<WireCaseSummary[]>([]);
+      if (call.url === `/api/cases/${REAL_ID}` && call.method === 'GET') {
+        return jsonResponse(simplesCase);
+      }
+      if (call.url === '/api/chat/structured') {
+        return chatStructuredResponse(REAL_ID, [
+          userMessage('Fui cobrado duas vezes.'),
+          assistantMessage('Resposta inicial.'),
+          userMessage('O prazo continua igual?'),
+          assistantMessage('Sim, conte a partir do recebimento.'),
+        ]);
+      }
+      return jsonResponse({error: 'unexpected'}, 500);
+    });
+
+    try {
+      // Wait for the real case list to load and the case to appear.
+      await screen.findByText('Cobranca indevida');
+
+      // Select the real case - this fetches its full data.
+      selectRealCase('Cobranca indevida');
+      await waitFor(() => expect(calls.some((c) => c.url === `/api/cases/${REAL_ID}` && c.method === 'GET')).toBe(true));
+
+      // Global preference defaults to "detalhado" (see defaults.ts initialPreferences).
+      // The case itself persists "simples"; the wire payload MUST use "simples".
+      await sendChatMessage('O prazo continua igual?');
+      await waitFor(() => expect(calls.some((c) => c.body?.message === 'O prazo continua igual?')).toBe(true));
+      const chatCall = calls.find((c) => c.body?.message === 'O prazo continua igual?');
+      expect(chatCall?.body?.response_style).toBe('simples');
+      expect(chatCall?.body?.session_id).toBe(REAL_ID);
+    } finally {
+      restore();
+    }
+  });
+
+  // NEX-004: a 200 response with invalid JSON must not leave isSendingMessage stuck
+  // and must surface a generic assistant error.
+  it('a 200 response with invalid JSON resets isSendingMessage and renders an error', async () => {
+    const {restore} = renderApp(async (allCalls) => {
+      const call = allCalls[allCalls.length - 1];
+      if (call.url === '/api/cases') return jsonResponse<WireCaseSummary[]>([]);
+      if (call.url === '/api/chat/structured') {
+        return new Response('not-json', {
+          status: 200,
+          headers: {'Content-Type': 'application/json'},
+        });
+      }
+      return jsonResponse({error: 'unexpected'}, 500);
+    });
+
+    try {
+      clickConversarTab();
+      await screen.findByText('Inicie sua Consulta de Consumo');
+      await sendChatMessage('Fui cobrado duas vezes.');
+
+      // Generic error message should appear; input should be re-enabled.
+      await screen.findByText('Nao foi possivel processar a resposta do servidor.');
+      const input = (await screen.findByPlaceholderText(
+        'Digite sua duvida ou responda ao advogado...',
+      )) as HTMLInputElement;
+      expect(input).not.toBeDisabled();
+    } finally {
+      restore();
+    }
+  });
 });
