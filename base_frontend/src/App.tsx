@@ -40,16 +40,16 @@ interface SendOptions {
 
 function deriveCaseMeta(text: string): { title: string; icon_name: IconName } {
   const lower = text.toLowerCase();
-  if (lower.includes("celular")) {
+  if (/\bcelular\b/i.test(lower)) {
     return { title: "Celular comprado online", icon_name: "shopping_bag" };
   }
-  if (lower.includes("cobr") || lower.includes("cobran")) {
+  if (/\bcobr(a|an|ad)/i.test(lower)) {
     return { title: "Cobranca indevida", icon_name: "receipt_long" };
   }
-  if (lower.includes("atraso") || lower.includes("entrega")) {
+  if (/\b(atraso|entrega)\b/i.test(lower)) {
     return { title: "Atraso na entrega", icon_name: "local_shipping" };
   }
-  if (lower.includes("notif") || lower.includes("extrajudicial")) {
+  if (/\b(notif\w+|extrajudicial)\b/i.test(lower)) {
     return { title: "Notificacao extrajudicial", icon_name: "gavel" };
   }
   return { title: "Nova consulta", icon_name: "gavel" };
@@ -134,6 +134,7 @@ export default function App() {
 
   // Deleting a case: demo stays local; real case calls API.
   const handleDeleteCase = async (caseId: string) => {
+    pendingBlockedCaseRef.current = null;
     const target = cases.find((c) => c.id === caseId);
     if (isDemoCase(target)) {
       setCases((prev) => prev.filter((c) => c.id !== caseId));
@@ -196,11 +197,14 @@ export default function App() {
           response_style: updated.responseStyle,
         });
         setCases((prev) => prev.map((c) => (c.id === synced.id ? synced : c)));
+        triggerToast("Configuracoes atualizadas!");
       } catch (err) {
         console.error("Failed to sync response style to case", err);
+        triggerToast("Atualizado localmente.");
       }
+    } else {
+      triggerToast("Configuracoes atualizadas!");
     }
-    triggerToast("Configuracoes atualizadas!");
   };
 
   // Explicit user-triggered "save this generated result" from the tool card.
@@ -211,7 +215,7 @@ export default function App() {
     const meta = deriveCaseMeta(firstUserMsg);
     try {
       const updated = await apiClient.updateCaseMeta(activeCase.id, {
-        title: deadline ? meta.title : meta.title,
+        title: meta.title,
         icon_name: meta.icon_name,
       });
       setCases((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
@@ -326,6 +330,7 @@ export default function App() {
         setIsSendingMessage(false);
         return;
       }
+      pendingBlockedCaseRef.current = null;
       setCurrentChatHistory((prev) => [
         ...prev,
         {

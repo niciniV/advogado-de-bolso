@@ -25,7 +25,7 @@ function jsonResponse<T>(body: T, status = 200): Response {
 
 function assistantMessage(text: string, extra: Partial<WireChatMessage> = {}): WireChatMessage {
   return {
-    id: 'assistant-1',
+    id: `assistant-${Math.random().toString(36).slice(2, 8)}`,
     sender: 'assistant',
     text,
     timestamp: Date.now(),
@@ -38,7 +38,7 @@ function assistantMessage(text: string, extra: Partial<WireChatMessage> = {}): W
 
 function userMessage(text: string): WireChatMessage {
   return {
-    id: 'user-1',
+    id: `user-${Math.random().toString(36).slice(2, 8)}`,
     sender: 'user',
     text,
     timestamp: Date.now(),
