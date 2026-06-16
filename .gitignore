@@ -18,6 +18,8 @@ build/
 .idea/
 .vscode/
 storage/chroma/
+storage/cases/
+storage/cases-test-reviewer/
 storage/hf_cache/
 storage/cli_history.txt
 data/raw/*
